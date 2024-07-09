@@ -8,12 +8,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"time"
 	"reflect"
+	"time"
 )
 
-// EncodeStruct encodes the fields of any struct into a byte slice
-func EncodeStruct(v interface{}) ([]byte, error) {
+// Serializer encodes a struct into a byte slice
+func Serializer(v interface{}) ([]byte, error) {
 	var encodedBytes bytes.Buffer
 	val := reflect.ValueOf(v)
 
@@ -37,9 +37,12 @@ func EncodeStruct(v interface{}) ([]byte, error) {
 			binary.Write(&encodedBytes, binary.BigEndian, field.Interface())
 
 		case reflect.String:
-			encodedBytes.WriteString(field.String()) // Directly write string content
+			strBytes := []byte(field.String())
+			binary.Write(&encodedBytes, binary.BigEndian, int32(len(strBytes))) // Write length
+			encodedBytes.Write(strBytes) // Write string content
 
 		case reflect.Slice:
+			binary.Write(&encodedBytes, binary.BigEndian, int32(field.Len())) // Write length
 			for j := 0; j < field.Len(); j++ {
 				elem := field.Index(j)
 				switch elem.Kind() {
@@ -49,7 +52,9 @@ func EncodeStruct(v interface{}) ([]byte, error) {
 					binary.Write(&encodedBytes, binary.BigEndian, elem.Interface())
 
 				case reflect.String:
-					encodedBytes.WriteString(elem.String()) // Directly write string content
+					elemBytes := []byte(elem.String())
+					binary.Write(&encodedBytes, binary.BigEndian, int32(len(elemBytes))) // Write length
+					encodedBytes.Write(elemBytes) // Write string content
 
 				default:
 					return nil, fmt.Errorf("EncodeStruct: unsupported slice element type %s", elem.Kind())
@@ -63,6 +68,90 @@ func EncodeStruct(v interface{}) ([]byte, error) {
 
 	return encodedBytes.Bytes(), nil
 }
+
+// Deserializer decodes a byte slice into a struct
+func Deserializer(data []byte, v interface{}) error {
+	buf := bytes.NewBuffer(data)
+	val := reflect.ValueOf(v)
+
+	// Ensure we have a pointer to a struct
+	if val.Kind() != reflect.Ptr {
+		return fmt.Errorf("DecodeStruct: expected a pointer to a struct, got %s", val.Kind())
+	}
+
+	val = val.Elem()
+
+	if val.Kind() != reflect.Struct {
+		return fmt.Errorf("DecodeStruct: expected a struct, got %s", val.Kind())
+	}
+
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		fieldType := field.Type()
+
+		switch fieldType.Kind() {
+		case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Float32, reflect.Float64, reflect.Bool:
+			if err := binary.Read(buf, binary.BigEndian, field.Addr().Interface()); err != nil {
+				return err
+			}
+
+		case reflect.String:
+			var strLen int32
+			if err := binary.Read(buf, binary.BigEndian, &strLen); err != nil {
+				return err
+			}
+			strBytes := make([]byte, strLen)
+			if _, err := buf.Read(strBytes); err != nil {
+				return err
+			}
+			field.SetString(string(strBytes))
+
+		case reflect.Slice:
+			var sliceLen int32
+			if err := binary.Read(buf, binary.BigEndian, &sliceLen); err != nil {
+				return err
+			}
+			slice := reflect.MakeSlice(fieldType, int(sliceLen), int(sliceLen))
+
+			for j := 0; j < int(sliceLen); j++ {
+				elem := slice.Index(j)
+
+				switch elem.Kind() {
+				case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+					reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+					reflect.Float32, reflect.Float64, reflect.Bool:
+					if err := binary.Read(buf, binary.BigEndian, elem.Addr().Interface()); err != nil {
+						return err
+					}
+
+				case reflect.String:
+					var elemLen int32
+					if err := binary.Read(buf, binary.BigEndian, &elemLen); err != nil {
+						return err
+					}
+					elemBytes := make([]byte, elemLen)
+					if _, err := buf.Read(elemBytes); err != nil {
+						return err
+					}
+					elem.SetString(string(elemBytes))
+
+				default:
+					return fmt.Errorf("DecodeStruct: unsupported slice element type %s", elem.Kind())
+				}
+			}
+
+			field.Set(slice)
+
+		default:
+			return fmt.Errorf("DecodeStruct: unsupported field type %s", fieldType.Kind())
+		}
+	}
+
+	return nil
+}
+
 
 // Converts a time.Time object to a byte array
 func TimestampToBytes(t time.Time) ([]byte, error) {
@@ -93,15 +182,14 @@ func BytesToTimestamp(b []byte) (time.Time, error) {
 	return t, nil
 }
 
-
 // GenerateRandomKey generates a random 32-byte key for AES-256
 func GenerateRandomKey() ([]byte, error) {
-    key := make([]byte, 32)
-    _, err := rand.Read(key)
-    if err != nil {
-        return nil, err
-    }
-    return key, nil
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
 }
 
 // Encrypt encrypts a message using AES-256-GCM
