@@ -51,6 +51,18 @@ func encodeField(encodedBytes *bytes.Buffer, field reflect.Value, fieldType refl
 		}
 		encodedBytes.Write(strBytes)
 
+	case reflect.Struct:
+		if fieldType == reflect.TypeOf(time.Time{}) {
+			timeStr := field.Interface().(time.Time).Format(time.RFC3339)
+			strBytes := []byte(timeStr)
+			if err := binary.Write(encodedBytes, binary.BigEndian, int32(len(strBytes))); err != nil {
+				return err
+			}
+			encodedBytes.Write(strBytes)
+		} else {
+			return encodeStruct(encodedBytes, field)
+		}
+
 	case reflect.Slice:
 		if err := binary.Write(encodedBytes, binary.BigEndian, int32(field.Len())); err != nil {
 			return err
@@ -68,6 +80,19 @@ func encodeField(encodedBytes *bytes.Buffer, field reflect.Value, fieldType refl
 
 	return nil
 }
+
+func encodeStruct(encodedBytes *bytes.Buffer, val reflect.Value) error {
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		fieldType := field.Type()
+
+		if err := encodeField(encodedBytes, field, fieldType); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 
 func Deserializer(data []byte, v interface{}) error {
 	buf := bytes.NewBuffer(data)
@@ -114,6 +139,25 @@ func decodeField(buf *bytes.Buffer, field reflect.Value, fieldType reflect.Type)
 		}
 		field.SetString(string(strBytes))
 
+	case reflect.Struct:
+		if fieldType == reflect.TypeOf(time.Time{}) {
+			var strLen int32
+			if err := binary.Read(buf, binary.BigEndian, &strLen); err != nil {
+				return err
+			}
+			strBytes := make([]byte, strLen)
+			if _, err := buf.Read(strBytes); err != nil {
+				return err
+			}
+			t, err := time.Parse(time.RFC3339, string(strBytes))
+			if err != nil {
+				return err
+			}
+			field.Set(reflect.ValueOf(t))
+		} else {
+			return decodeStruct(buf, field)
+		}
+
 	case reflect.Slice:
 		var sliceLen int32
 		if err := binary.Read(buf, binary.BigEndian, &sliceLen); err != nil {
@@ -136,6 +180,20 @@ func decodeField(buf *bytes.Buffer, field reflect.Value, fieldType reflect.Type)
 
 	return nil
 }
+
+func decodeStruct(buf *bytes.Buffer, val reflect.Value) error {
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		fieldType := field.Type()
+
+		if err := decodeField(buf, field, fieldType); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+
 
 
 

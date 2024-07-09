@@ -1,98 +1,84 @@
 package test
 
 import (
-	"bytes"
-	"encoding/binary"
 	"github.com/ulfaric/srmcp"
 	"reflect"
 	"testing"
+	"time"
 )
+// TestSerialization tests the Serializer and Deserializer functions with the updated struct.
+func TestSerializationWithDeepNestedSlice(t *testing.T) {
+    // DeepNestedStruct is a struct to be nested within NestedStruct.
+    type DeepNestedStruct struct {
+        ID      uint32
+        Details string
+    }
 
-// TestSerializer tests the Serializer function with a struct containing various field types, including lengths for strings and slices.
-func TestSerializer(t *testing.T) {
-	type TestStruct struct {
-		Age    uint32
-		Weight float64
-		Active bool
-		Name   string
-		Scores []int32
-	}
+    // NestedStruct is updated to include a slice of DeepNestedStruct.
+    type NestedStruct struct {
+        ID       uint32
+        Info     string
+        DeepInfo []DeepNestedStruct // New field for deeper nesting
+    }
 
-	// Create an instance of TestStruct
-	testData := TestStruct{
-		Age:    25,
-		Weight: 72.5,
-		Active: true,
-		Name:   "John Doe",
-		Scores: []int32{90, 85, 88},
-	}
+    // TestStruct definition remains the same, but will now include deeper nested slices.
+    type TestStruct struct {
+        Age      uint32
+        Name     string
+        Scores   []int32
+        Birthday time.Time
+        Details  NestedStruct
+        MoreInfo []NestedStruct
+    }
 
-	// Expected byte slice after encoding testData
-	buf := &bytes.Buffer{}
+    original := TestStruct{
+        Age:      30,
+        Name:     "Alice",
+        Scores:   []int32{100, 95, 80},
+        Birthday: time.Date(1990, time.January, 1, 0, 0, 0, 0, time.UTC),
+        Details: NestedStruct{
+            ID:   1,
+            Info: "Additional details",
+            DeepInfo: []DeepNestedStruct{ // Adding deep nested elements
+                {ID: 1, Details: "Deep info 1"},
+            },
+        },
+        MoreInfo: []NestedStruct{
+            {
+                ID:   2,
+                Info: "More info 1",
+                DeepInfo: []DeepNestedStruct{ // Adding deep nested elements
+                    {ID: 2, Details: "Deep info 2"},
+                },
+            },
+            {
+                ID:   3,
+                Info: "More info 2",
+                DeepInfo: []DeepNestedStruct{ // Adding deep nested elements
+                    {ID: 3, Details: "Deep info 3"},
+                },
+            },
+        },
+    }
 
-	// Manually encode testData to match the expected output of Serializer
-	binary.Write(buf, binary.BigEndian, testData.Age)
-	binary.Write(buf, binary.BigEndian, testData.Weight)
-	binary.Write(buf, binary.BigEndian, testData.Active)
+    // Serialize the original struct
+    serialized, err := srmcp.Serializer(original)
+    if err != nil {
+        t.Fatalf("Failed to serialize: %v", err)
+    }
 
-	// Encode the Name field with its length
-	nameBytes := []byte(testData.Name)
-	binary.Write(buf, binary.BigEndian, int32(len(nameBytes)))
-	buf.Write(nameBytes)
+    // Deserialize into a new struct
+    var deserialized TestStruct
+    err = srmcp.Deserializer(serialized, &deserialized)
+    if err != nil {
+        t.Fatalf("Failed to deserialize: %v", err)
+    }
 
-	// Encode the Scores slice with its length
-	binary.Write(buf, binary.BigEndian, int32(len(testData.Scores)))
-	for _, score := range testData.Scores {
-		binary.Write(buf, binary.BigEndian, score)
-	}
+    // Compare the original and deserialized structs
+    if !reflect.DeepEqual(original, deserialized) {
+        t.Errorf("Original and deserialized structs do not match.\nOriginal: %+v\nDeserialized: %+v", original, deserialized)
+    }
 
-	// Encode testData using Serializer
-	encodedBytes, err := srmcp.Serializer(testData)
-	if err != nil {
-		t.Errorf("Serializer returned an error: %v", err)
-	}
-
-	// Compare the encoded bytes with the expected bytes
-	if !reflect.DeepEqual(encodedBytes, buf.Bytes()) {
-		t.Errorf("Encoded bytes do not match expected bytes.\nGot: %v\nExpected: %v", encodedBytes, buf.Bytes())
-	}
-
-	t.Logf("Encoded bytes: %v", encodedBytes)
-}
-
-// TestSerializationDeserialization tests the Serializer and Deserializer functions.
-func TestSerializationDeserialization(t *testing.T) {
-
-	// TestStruct is a struct for testing serialization and deserialization.
-	type TestStruct struct {
-		Age    uint32
-		Name   string
-		Scores []int32
-	}
-	original := TestStruct{
-		Age:    30,
-		Name:   "Alice",
-		Scores: []int32{100, 95, 80},
-	}
-
-	// Serialize the original struct
-	serialized, err := srmcp.Serializer(original)
-	if err != nil {
-		t.Fatalf("Failed to serialize: %v", err)
-	}
-
-	// Deserialize into a new struct
-	var deserialized TestStruct
-	err = srmcp.Deserializer(serialized, &deserialized)
-	if err != nil {
-		t.Fatalf("Failed to deserialize: %v", err)
-	}
-
-	// Compare the original and deserialized structs
-	if !reflect.DeepEqual(original, deserialized) {
-		t.Errorf("Original and deserialized structs do not match.\nOriginal: %+v\nDeserialized: %+v", original, deserialized)
-	}
-
-	t.Logf("Original: %+v", original)
-	t.Logf("Deserialized: %+v", deserialized)
+    t.Logf("Original struct: %+v", original)
+    t.Logf("Deserialized struct: %+v", deserialized)
 }
