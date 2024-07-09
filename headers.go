@@ -2,7 +2,42 @@ package srmcp
 
 import (
 	"time"
+	"reflect"
+	"bytes"
+	"encoding/binary"
 )
+
+type Header struct {}
+
+func (h *Header) Encode() []byte {
+	var encodedBytes bytes.Buffer
+	head := reflect.ValueOf(h).Elem()
+
+	for i := 0; i < head.NumField(); i++ {
+		field := head.Field(i)
+		fieldType := field.Type()
+
+		switch fieldType.Kind() {
+		case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Float32, reflect.Float64, reflect.Bool:
+			binary.Write(&encodedBytes, binary.BigEndian, field.Interface())
+
+		case reflect.String:
+			encodedBytes.WriteString(field.String()) // Directly write string content
+
+		case reflect.Slice:
+			if fieldType.Elem().Kind() == reflect.Uint8 { // Handle []byte separately
+				encodedBytes.Write(field.Bytes()) // Directly write slice content
+			}
+
+		default:
+			panic("unsupported field type")
+		}
+	}
+
+	return encodedBytes.Bytes()
+}
 
 // MessageHeader is the header of the message
 type MessageHeader struct {

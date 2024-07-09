@@ -9,7 +9,60 @@ import (
 	"fmt"
 	"io"
 	"time"
+	"reflect"
 )
+
+// EncodeStruct encodes the fields of any struct into a byte slice
+func EncodeStruct(v interface{}) ([]byte, error) {
+	var encodedBytes bytes.Buffer
+	val := reflect.ValueOf(v)
+
+	// Ensure we have the actual struct value
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+
+	if val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("EncodeStruct: expected a struct, got %s", val.Kind())
+	}
+
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		fieldType := field.Type()
+
+		switch fieldType.Kind() {
+		case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Float32, reflect.Float64, reflect.Bool:
+			binary.Write(&encodedBytes, binary.BigEndian, field.Interface())
+
+		case reflect.String:
+			encodedBytes.WriteString(field.String()) // Directly write string content
+
+		case reflect.Slice:
+			for j := 0; j < field.Len(); j++ {
+				elem := field.Index(j)
+				switch elem.Kind() {
+				case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+					reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+					reflect.Float32, reflect.Float64, reflect.Bool:
+					binary.Write(&encodedBytes, binary.BigEndian, elem.Interface())
+
+				case reflect.String:
+					encodedBytes.WriteString(elem.String()) // Directly write string content
+
+				default:
+					return nil, fmt.Errorf("EncodeStruct: unsupported slice element type %s", elem.Kind())
+				}
+			}
+
+		default:
+			return nil, fmt.Errorf("EncodeStruct: unsupported field type %s", fieldType.Kind())
+		}
+	}
+
+	return encodedBytes.Bytes(), nil
+}
 
 // Converts a time.Time object to a byte array
 func TimestampToBytes(t time.Time) ([]byte, error) {
