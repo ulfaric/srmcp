@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// Serializer encodes a struct into a byte slice
 func Serializer(v interface{}) ([]byte, error) {
 	var encodedBytes bytes.Buffer
 	val := reflect.ValueOf(v)
@@ -30,46 +29,46 @@ func Serializer(v interface{}) ([]byte, error) {
 		field := val.Field(i)
 		fieldType := field.Type()
 
-		switch fieldType.Kind() {
-		case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-			reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-			reflect.Float32, reflect.Float64, reflect.Bool:
-			binary.Write(&encodedBytes, binary.BigEndian, field.Interface())
-
-		case reflect.String:
-			strBytes := []byte(field.String())
-			binary.Write(&encodedBytes, binary.BigEndian, int32(len(strBytes))) // Write length
-			encodedBytes.Write(strBytes) // Write string content
-
-		case reflect.Slice:
-			binary.Write(&encodedBytes, binary.BigEndian, int32(field.Len())) // Write length
-			for j := 0; j < field.Len(); j++ {
-				elem := field.Index(j)
-				switch elem.Kind() {
-				case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-					reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-					reflect.Float32, reflect.Float64, reflect.Bool:
-					binary.Write(&encodedBytes, binary.BigEndian, elem.Interface())
-
-				case reflect.String:
-					elemBytes := []byte(elem.String())
-					binary.Write(&encodedBytes, binary.BigEndian, int32(len(elemBytes))) // Write length
-					encodedBytes.Write(elemBytes) // Write string content
-
-				default:
-					return nil, fmt.Errorf("EncodeStruct: unsupported slice element type %s", elem.Kind())
-				}
-			}
-
-		default:
-			return nil, fmt.Errorf("EncodeStruct: unsupported field type %s", fieldType.Kind())
+		if err := encodeField(&encodedBytes, field, fieldType); err != nil {
+			return nil, err
 		}
 	}
 
 	return encodedBytes.Bytes(), nil
 }
 
-// Deserializer decodes a byte slice into a struct
+func encodeField(encodedBytes *bytes.Buffer, field reflect.Value, fieldType reflect.Type) error {
+	switch fieldType.Kind() {
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Float32, reflect.Float64, reflect.Bool:
+		return binary.Write(encodedBytes, binary.BigEndian, field.Interface())
+
+	case reflect.String:
+		strBytes := []byte(field.String())
+		if err := binary.Write(encodedBytes, binary.BigEndian, int32(len(strBytes))); err != nil {
+			return err
+		}
+		encodedBytes.Write(strBytes)
+
+	case reflect.Slice:
+		if err := binary.Write(encodedBytes, binary.BigEndian, int32(field.Len())); err != nil {
+			return err
+		}
+		for j := 0; j < field.Len(); j++ {
+			elem := field.Index(j)
+			if err := encodeField(encodedBytes, elem, elem.Type()); err != nil {
+				return err
+			}
+		}
+
+	default:
+		return fmt.Errorf("EncodeStruct: unsupported field type %s", fieldType.Kind())
+	}
+
+	return nil
+}
+
 func Deserializer(data []byte, v interface{}) error {
 	buf := bytes.NewBuffer(data)
 	val := reflect.ValueOf(v)
@@ -89,68 +88,55 @@ func Deserializer(data []byte, v interface{}) error {
 		field := val.Field(i)
 		fieldType := field.Type()
 
-		switch fieldType.Kind() {
-		case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-			reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-			reflect.Float32, reflect.Float64, reflect.Bool:
-			if err := binary.Read(buf, binary.BigEndian, field.Addr().Interface()); err != nil {
-				return err
-			}
-
-		case reflect.String:
-			var strLen int32
-			if err := binary.Read(buf, binary.BigEndian, &strLen); err != nil {
-				return err
-			}
-			strBytes := make([]byte, strLen)
-			if _, err := buf.Read(strBytes); err != nil {
-				return err
-			}
-			field.SetString(string(strBytes))
-
-		case reflect.Slice:
-			var sliceLen int32
-			if err := binary.Read(buf, binary.BigEndian, &sliceLen); err != nil {
-				return err
-			}
-			slice := reflect.MakeSlice(fieldType, int(sliceLen), int(sliceLen))
-
-			for j := 0; j < int(sliceLen); j++ {
-				elem := slice.Index(j)
-
-				switch elem.Kind() {
-				case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-					reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-					reflect.Float32, reflect.Float64, reflect.Bool:
-					if err := binary.Read(buf, binary.BigEndian, elem.Addr().Interface()); err != nil {
-						return err
-					}
-
-				case reflect.String:
-					var elemLen int32
-					if err := binary.Read(buf, binary.BigEndian, &elemLen); err != nil {
-						return err
-					}
-					elemBytes := make([]byte, elemLen)
-					if _, err := buf.Read(elemBytes); err != nil {
-						return err
-					}
-					elem.SetString(string(elemBytes))
-
-				default:
-					return fmt.Errorf("DecodeStruct: unsupported slice element type %s", elem.Kind())
-				}
-			}
-
-			field.Set(slice)
-
-		default:
-			return fmt.Errorf("DecodeStruct: unsupported field type %s", fieldType.Kind())
+		if err := decodeField(buf, field, fieldType); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
+
+func decodeField(buf *bytes.Buffer, field reflect.Value, fieldType reflect.Type) error {
+	switch fieldType.Kind() {
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Float32, reflect.Float64, reflect.Bool:
+		return binary.Read(buf, binary.BigEndian, field.Addr().Interface())
+
+	case reflect.String:
+		var strLen int32
+		if err := binary.Read(buf, binary.BigEndian, &strLen); err != nil {
+			return err
+		}
+		strBytes := make([]byte, strLen)
+		if _, err := buf.Read(strBytes); err != nil {
+			return err
+		}
+		field.SetString(string(strBytes))
+
+	case reflect.Slice:
+		var sliceLen int32
+		if err := binary.Read(buf, binary.BigEndian, &sliceLen); err != nil {
+			return err
+		}
+		slice := reflect.MakeSlice(fieldType, int(sliceLen), int(sliceLen))
+
+		for j := 0; j < int(sliceLen); j++ {
+			elem := slice.Index(j)
+			if err := decodeField(buf, elem, elem.Type()); err != nil {
+				return err
+			}
+		}
+
+		field.Set(slice)
+
+	default:
+		return fmt.Errorf("DecodeStruct: unsupported field type %s", fieldType.Kind())
+	}
+
+	return nil
+}
+
 
 
 // Converts a time.Time object to a byte array
