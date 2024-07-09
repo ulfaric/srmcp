@@ -37,8 +37,6 @@ func (ack *ACK) SetStatusCode(statusCode int) {
 	ack.StatusCode = statusCode
 }
 
-
-
 // ServerInfo message which is sent by the server to the client to provide information about the server
 type ServerInfo struct {
 	Header        Header
@@ -94,4 +92,12 @@ func (serverInfo *ServerInfo) SetNumberOfNodes(numberOfNodes int) {
 // Set the nodes in the server
 func (serverInfo *ServerInfo) SetNodes(nodes []*Node) {
 	serverInfo.Nodes = nodes
+}
+
+type Subscribe struct {
+	Header   Header
+	Topic    string
+	Node     []Node
+	Interval interface{}
+	Duration interface{}
 }
