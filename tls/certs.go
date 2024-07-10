@@ -13,12 +13,28 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+// Generate a UUID serial number
+func generateSerialNumber() (*big.Int, error) {
+	serialNumberUUID, err := uuid.NewRandom()
+	if err != nil {
+		return nil, err
+	}
+	return new(big.Int).SetBytes(serialNumberUUID[:]), nil
+}
 
 // CreateCA creates a new Certificate Authority.
 func CreateCA(certPath, keyPath, organization, country string, validYears int) (*x509.Certificate, *rsa.PrivateKey, error) {
+	serialNumber, err := generateSerialNumber()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	ca := &x509.Certificate{
-		SerialNumber: big.NewInt(2023),
+		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{organization},
 			Country:      []string{country},
@@ -51,18 +67,41 @@ func CreateCA(certPath, keyPath, organization, country string, validYears int) (
 }
 
 // CreateServerCert creates a new server certificate signed by the CA.
-func CreateServerCert(caCert *x509.Certificate, caKey *rsa.PrivateKey, certPath, keyPath, organization, country string, validYears int) (*x509.Certificate, *rsa.PrivateKey, error) {
+func CreateServerCert(caCert *x509.Certificate, caKey *rsa.PrivateKey, certPath, keyPath, organization, country string, validYears int, dnsNames ...string) (*x509.Certificate, *rsa.PrivateKey, error) {
+	serialNumber, err := generateSerialNumber()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Get host machine's IP addresses
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ipAddresses []net.IP
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ipNet.IP.To4() != nil {
+				ipAddresses = append(ipAddresses, ipNet.IP)
+			}
+		}
+	}
+	ipAddresses = append(ipAddresses, net.ParseIP("127.0.0.1")) // Include localhost
+	dnsNames = append(dnsNames, "localhost")                   // Include localhost
+
 	serverCert := &x509.Certificate{
-		SerialNumber: big.NewInt(2024),
+		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{organization},
 			Country:      []string{country},
 		},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().AddDate(validYears, 0, 0), // Valid for given years
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().AddDate(validYears, 0, 0), // Valid for given years
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: ipAddresses,
+		DNSNames:    dnsNames,
 	}
 
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -86,17 +125,41 @@ func CreateServerCert(caCert *x509.Certificate, caKey *rsa.PrivateKey, certPath,
 }
 
 // CreateClientCert creates a new client certificate signed by the CA.
-func CreateClientCert(caCert *x509.Certificate, caKey *rsa.PrivateKey, certPath, keyPath, organization, country string, validYears int) (*x509.Certificate, *rsa.PrivateKey, error) {
+func CreateClientCert(caCert *x509.Certificate, caKey *rsa.PrivateKey, certPath, keyPath, organization, country string, validYears int, dnsNames ...string) (*x509.Certificate, *rsa.PrivateKey, error) {
+	serialNumber, err := generateSerialNumber()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Get host machine's IP addresses
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ipAddresses []net.IP
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ipNet.IP.To4() != nil {
+				ipAddresses = append(ipAddresses, ipNet.IP)
+			}
+		}
+	}
+	ipAddresses = append(ipAddresses, net.ParseIP("127.0.0.1")) // Include localhost
+	dnsNames = append(dnsNames, "localhost")                   // Include localhost
+
 	clientCert := &x509.Certificate{
-		SerialNumber: big.NewInt(2025),
+		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{organization},
 			Country:      []string{country},
 		},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().AddDate(validYears, 0, 0), // Valid for given years
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().AddDate(validYears, 0, 0), // Valid for given years
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		IPAddresses: ipAddresses,
+		DNSNames:    dnsNames,
 	}
 
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
