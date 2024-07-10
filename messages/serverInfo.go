@@ -1,55 +1,25 @@
-package srmcp
+package messages
 
 import (
 	"time"
+	"github.com/ulfaric/srmcp"
+	"github.com/ulfaric/srmcp/node"
 )
 
-// Acknowledgement message
-type ACK struct {
-	Header     Header
-	StatusCode int
-}
-
-// Acknowledgement message constructor
-func NewACK(SenderID string, statusCode int, time time.Time) *ACK {
-	return &ACK{
-		Header: Header{
-			MessageType: "ACK",
-			SenderID:    SenderID,
-			Timestamp:   time,
-		},
-		StatusCode: statusCode,
-	}
-}
-
-// Get the header of the message
-func (ack *ACK) GetHeader() Header {
-	return ack.Header
-}
-
-// Get the status code of the message
-func (ack *ACK) GetStatusCode() int {
-	return ack.StatusCode
-}
-
-// Set the status code of the message
-func (ack *ACK) SetStatusCode(statusCode int) {
-	ack.StatusCode = statusCode
-}
 
 // ServerInfo message which is sent by the server to the client to provide information about the server
 type ServerInfo struct {
 	Header        Header
 	Hostname      string
 	NumberOfNodes int
-	Nodes         []*Node
+	Nodes         []*node.Node
 }
 
 // ServerInfo message constructor
-func NewServerInfo(SenderID string, hostname string, numberOfNodes int, nodes []*Node, time time.Time) *ServerInfo {
+func NewServerInfo(SenderID string, hostname string, numberOfNodes int, nodes []*node.Node, time time.Time) *ServerInfo {
 	return &ServerInfo{
 		Header: Header{
-			MessageType: "ServerInfo",
+			MessageType: srmcp.ServerInfo,
 			SenderID:    SenderID,
 			Timestamp:   time,
 		},
@@ -75,7 +45,7 @@ func (serverInfo *ServerInfo) GetNumberOfNodes() int {
 }
 
 // Get the nodes in the server
-func (serverInfo *ServerInfo) GetNodes() []*Node {
+func (serverInfo *ServerInfo) GetNodes() []*node.Node {
 	return serverInfo.Nodes
 }
 
@@ -90,14 +60,6 @@ func (serverInfo *ServerInfo) SetNumberOfNodes(numberOfNodes int) {
 }
 
 // Set the nodes in the server
-func (serverInfo *ServerInfo) SetNodes(nodes []*Node) {
+func (serverInfo *ServerInfo) SetNodes(nodes []*node.Node) {
 	serverInfo.Nodes = nodes
-}
-
-type Subscribe struct {
-	Header   Header
-	Topic    string
-	Node     []Node
-	Interval interface{}
-	Duration interface{}
 }

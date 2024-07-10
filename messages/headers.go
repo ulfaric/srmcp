@@ -1,4 +1,4 @@
-package srmcp
+package messages
 
 import (
 	"time"

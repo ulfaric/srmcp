@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 )
-// TestSerialization tests the Serializer and Deserializer functions with the updated struct.
-func TestSerializationWithDeepNestedSlice(t *testing.T) {
+
+
+// TestSerialization tests the Serializer and Deserializer functions.
+func TestSerialization(t *testing.T) {
     // DeepNestedStruct is a struct to be nested within NestedStruct.
     type DeepNestedStruct struct {
         ID      uint32
