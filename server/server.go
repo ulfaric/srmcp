@@ -89,8 +89,8 @@ func (s *Server) StartTLSListener(addr string) (net.Listener, error) {
 
 	tlsConfig := &tls.Config{
 		Certificates:             []tls.Certificate{cert},
-		ClientAuth:               tls.RequireAnyClientCert, // Allow any client certificate for the initial handshake
-		InsecureSkipVerify:       true,                     // Skip verification at this point
+		ClientAuth:               tls.RequireAnyClientCert,
+		// ClientCAs:                LoadCertPool(s.CACert),
 		VerifyPeerCertificate:    s.verifyClientCertificate, // Custom verification
 	}
 
@@ -120,6 +120,7 @@ func (s *Server) verifyClientCertificate(rawCerts [][]byte, verifiedChains [][]*
 
 	if _, err := clientCert.Verify(opts); err != nil {
 		// Return an error to terminate the connection without sending an alert
+		log.Printf("Connection refused: client certificate verification failed: %v", err)
 		return errors.New("client certificate verification failed")
 	}
 
@@ -168,7 +169,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	clientID := conn.RemoteAddr().String()
 	s.AddClient(clientID, conn, clientCert)
-	log.Printf("Client connected: %s", clientID)
+	log.Printf("Client %s connected.", clientID)
 }
 
 // Helper functions to load certificates and keys from files
