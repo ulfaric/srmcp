@@ -36,3 +36,8 @@ go.work.sum
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+test/certs
+test/certs/*
+test/keys
+test/keys/*
