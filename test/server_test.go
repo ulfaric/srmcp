@@ -78,7 +78,7 @@ func TestServer(t *testing.T) {
 				PrivateKey:  clientKey,
 			},
 		},
-		RootCAs:    LoadCertPool(caCert),
+		RootCAs:    LoadCertPool(server.CACert),
 		ServerName: "localhost", // Ensure the server name matches the certificate
 	}
 
@@ -88,9 +88,10 @@ func TestServer(t *testing.T) {
 		t.Fatalf("Failed to connect to server: %v", err)
 	}
 	defer conn.Close()
+	time.Sleep(1 * time.Second)
 
 	// Check if client is added to server's client list
-	clientID := conn.RemoteAddr().String()
+	clientID := conn.LocalAddr().String()
 	_, exists := server.GetClient(clientID)
 	if !exists {
 		t.Fatalf("Client was not added to server's client list")
