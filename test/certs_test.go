@@ -7,11 +7,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ulfaric/srmcp/tls"
+	"github.com/ulfaric/srmcp/certs"
 )
 
 func TestCreateCA(t *testing.T) {
-	caCert, caKey, err := tls.CreateCA("certs/ca_cert.pem", "keys/ca_key.pem", "My CA Organization", "US", 10)
+	caCert, caKey, err := certs.CreateCA("certs/ca_cert.pem", "keys/ca_key.pem", "My CA Organization", "US", 10)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
@@ -21,11 +21,11 @@ func TestCreateCA(t *testing.T) {
 }
 
 func TestCreateServerCert(t *testing.T) {
-	caCert, caKey, err := tls.CreateCA("", "", "My CA Organization", "US", 10)
+	caCert, caKey, err := certs.CreateCA("", "", "My CA Organization", "US", 10)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
-	serverCert, serverKey, err := tls.CreateServerCert(caCert, caKey, "certs/server_cert.pem", "keys/server_key.pem", "My Server Organization", "US", 1)
+	serverCert, serverKey, err := certs.CreateServerCert(caCert, caKey, "certs/server_cert.pem", "keys/server_key.pem", "My Server Organization", "US", 1)
 	if err != nil {
 		t.Fatalf("Failed to create server certificate: %v", err)
 	}
@@ -35,11 +35,11 @@ func TestCreateServerCert(t *testing.T) {
 }
 
 func TestCreateClientCert(t *testing.T) {
-	caCert, caKey, err := tls.CreateCA("", "", "My CA Organization", "US", 10)
+	caCert, caKey, err := certs.CreateCA("", "", "My CA Organization", "US", 10)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
-	clientCert, clientKey, err := tls.CreateClientCert(caCert, caKey, "certs/client_cert.pem", "keys/client_key.pem", "My Client Organization", "US", 1)
+	clientCert, clientKey, err := certs.CreateClientCert(caCert, caKey, "certs/client_cert.pem", "keys/client_key.pem", "My Client Organization", "US", 1)
 	if err != nil {
 		t.Fatalf("Failed to create client certificate: %v", err)
 	}
@@ -50,19 +50,19 @@ func TestCreateClientCert(t *testing.T) {
 
 func TestCertTrust(t *testing.T) {
 	// Recreate CA
-	caCert, caKey, err := tls.CreateCA("certs/ca_cert.pem", "keys/ca_key.pem", "My CA Organization", "US", 10)
+	caCert, caKey, err := certs.CreateCA("certs/ca_cert.pem", "keys/ca_key.pem", "My CA Organization", "US", 10)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
 
 	// Recreate server certificate
-	_, _, err = tls.CreateServerCert(caCert, caKey, "certs/server_cert.pem", "keys/server_key.pem", "My Server Organization", "US", 1)
+	_, _, err = certs.CreateServerCert(caCert, caKey, "certs/server_cert.pem", "keys/server_key.pem", "My Server Organization", "US", 1)
 	if err != nil {
 		t.Fatalf("Failed to create server certificate: %v", err)
 	}
 
 	// Recreate client certificate
-	_, _, err = tls.CreateClientCert(caCert, caKey, "certs/client_cert.pem", "keys/client_key.pem", "My Client Organization", "US", 1)
+	_, _, err = certs.CreateClientCert(caCert, caKey, "certs/client_cert.pem", "keys/client_key.pem", "My Client Organization", "US", 1)
 	if err != nil {
 		t.Fatalf("Failed to create client certificate: %v", err)
 	}

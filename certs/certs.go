@@ -1,6 +1,6 @@
 // certs.go
 
-package tls
+package certs
 
 import (
 	"crypto/rand"
