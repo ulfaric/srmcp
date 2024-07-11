@@ -248,10 +248,6 @@ func LoadPrivateKey(filename string) (*rsa.PrivateKey, error) {
 
 func LoadCertPool(cert  *x509.Certificate) *x509.CertPool {
 	pool := x509.NewCertPool()
-	// cert, err := LoadCertificate(filename)
-	// if err != nil {
-	// 	log.Fatalf("Failed to load certificate: %v", err)
-	// }
 	pool.AddCert(cert)
 	return pool
 }

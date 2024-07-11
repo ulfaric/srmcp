@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"io"
 
 	"github.com/ulfaric/srmcp/certs"
 )
@@ -25,8 +26,8 @@ type Server struct {
 	PrivateKey  *rsa.PrivateKey
 	CACert      *x509.Certificate
 	ControlConn net.Conn
-	Clients     map[string]*Client // Clients mapped by some identifier (e.g., IP address or client ID)
-	mu          sync.Mutex         // To ensure concurrent access to Clients map is safe
+	Clients     map[string]*Client
+	mu          sync.Mutex
 }
 
 // NewServer creates a new Server instance by reading the certificate and key from files.
@@ -88,9 +89,11 @@ func (s *Server) StartTLSListener(addr string) (net.Listener, error) {
 	}
 
 	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		ClientAuth:         tls.RequireAndVerifyClientCert,
-		ClientCAs:          certs.LoadCertPool(s.CACert),
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    certs.LoadCertPool(s.CACert),
+		// InsecureSkipVerify: true,
+		// VerifyPeerCertificate: s.verifyClientCertificate,
 	}
 
 	listener, err := tls.Listen("tcp", addr, tlsConfig)
@@ -102,29 +105,27 @@ func (s *Server) StartTLSListener(addr string) (net.Listener, error) {
 }
 
 // verifyClientCertificate is a custom client certificate verification function.
-// func (s *Server) verifyClientCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-// 	// Parse the client's certificate
-// 	clientCert, err := x509.ParseCertificate(rawCerts[0])
-// 	if err != nil {
-// 		return err
-// 	}
+func (s *Server) verifyClientCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+	// Parse the client's certificate
+	clientCert, err := x509.ParseCertificate(rawCerts[0])
+	if err != nil {
+		return err
+	}
 
-// 	// Verify that the client's certificate was signed by the same CA
-// 	roots := x509.NewCertPool()
-// 	roots.AddCert(s.CACert)
-// 	opts := x509.VerifyOptions{
-// 		Roots: roots,
-// 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-// 	}
+	// Verify that the client's certificate was signed by the same CA
+	roots := x509.NewCertPool()
+	roots.AddCert(s.CACert)
+	opts := x509.VerifyOptions{
+		Roots: roots,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}
 
-// 	if _, err := clientCert.Verify(opts); err != nil {
-// 		// Return an error to terminate the connection without sending an alert
-// 		log.Printf("Connection refused: client certificate verification failed: %v", err)
-// 		return errors.New("client certificate verification failed")
-// 	}
+	if _, err := clientCert.Verify(opts); err != nil {
+		return err
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
 // Run starts the server and listens for incoming TLS connections.
 func (s *Server) Run(addr string) {
@@ -155,6 +156,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	err := tlsConn.Handshake()
 	if err != nil {
 		// Simply close the connection without logging the error or sending alerts
+		log.Printf("Failed to perform TLS handshake: %v", err)
 		return
 	}
 
@@ -169,6 +171,24 @@ func (s *Server) handleConnection(conn net.Conn) {
 	clientID := conn.RemoteAddr().String()
 	s.AddClient(clientID, conn, clientCert)
 	log.Printf("Client %s connected.", clientID)
+	// Read and log incoming messages
+	buf := make([]byte, 1024)
+	for {
+		n, err := tlsConn.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Error reading from client %s: %v", clientID, err)
+				s.RemoveClient(clientID)
+				return
+			}
+		}
+		if n == 0 {
+			continue
+		}
+		message := string(buf[:n])
+		log.Printf("Received message from client %s: %s", clientID, message)
+	}
+
 }
 
 func EncodeCertificatePEM(cert *x509.Certificate) []byte {

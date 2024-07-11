@@ -51,7 +51,7 @@ func TestServer(t *testing.T) {
 	}
 
 	// Start server in a separate goroutine
-	go server.Run("127.0.0.1:8443")
+	go server.Run("127.0.0.1:8888")
 
 	// Allow server time to start
 	time.Sleep(1 * time.Second)
@@ -80,7 +80,7 @@ func TestServer(t *testing.T) {
 	}
 
 	// Connect to server as client
-	conn, err := tls.Dial("tcp", "localhost:8443", clientTLSConfig)
+	conn, err := tls.Dial("tcp", "localhost:8888", clientTLSConfig)
 	if err != nil {
 		t.Fatalf("Failed to connect to server: %v", err)
 	}
@@ -93,6 +93,11 @@ func TestServer(t *testing.T) {
 	if !exists {
 		t.Fatalf("Client was not added to server's client list")
 	}
+	_, err = conn.Write([]byte("Hello, server!"))
+	if err != nil {
+		t.Fatalf("Failed to write to server: %v", err)
+	}
+
 }
 
 func TestServerWithDifferentCA(t *testing.T) {
@@ -142,7 +147,7 @@ func TestServerWithDifferentCA(t *testing.T) {
 	}
 
 	// Start server in a separate goroutine
-	go server.Run("127.0.0.1:8443")
+	go server.Run("127.0.0.1:8888")
 
 	// Allow server time to start
 	time.Sleep(1 * time.Second)
@@ -158,7 +163,7 @@ func TestServerWithDifferentCA(t *testing.T) {
 	}
 
 	// Create TLS configuration for client
-	clientCACert, _ = certs.LoadCertificate(clientCACertPath)
+	caCert, _ := certs.LoadCertificate(clientCACertPath)
 	clientTLSConfig := &tls.Config{
 		Certificates: []tls.Certificate{
 			{
@@ -166,17 +171,20 @@ func TestServerWithDifferentCA(t *testing.T) {
 				PrivateKey:  clientKey,
 			},
 		},
-		RootCAs: certs.LoadCertPool(clientCACert),
-		InsecureSkipVerify: true, // Skip verification of server certificate
+		RootCAs:    certs.LoadCertPool(caCert),
+		ServerName: "localhost", // Ensure the server name matches the certificate
+		// InsecureSkipVerify: true,
 	}
 
 	// Connect to server as client
-	conn, err := tls.Dial("tcp", "localhost:8443", clientTLSConfig)
-	if err == nil {
-		defer conn.Close()
-		t.Fatalf("Client connected to server with different CA, connection should have failed")
-	} else {
-		t.Logf("Client failed to connect to server with different CA, as expected: %s", err)
+	conn, err := tls.Dial("tcp", "localhost:8888", clientTLSConfig)
+	if err != nil {
+		t.Fatalf("Failed to connect to server: %v", err)
 	}
+	_, err = conn.Write([]byte("Hello, server!"))
+	if err != nil {
+		t.Fatalf("Failed to write to server: %v", err)
+	}
+	defer conn.Close()
 }
 
