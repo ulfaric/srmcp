@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"errors"
 
 	"github.com/google/uuid"
 )
@@ -219,4 +220,38 @@ func saveCertAndKey(certPath, keyPath string, certBytes []byte, privKey *rsa.Pri
 	}
 
 	return nil
+}
+
+func LoadCertificate(filename string) (*x509.Certificate, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, errors.New("failed to decode PEM block containing certificate")
+	}
+	return x509.ParseCertificate(block.Bytes)
+}
+
+func LoadPrivateKey(filename string) (*rsa.PrivateKey, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, errors.New("failed to decode PEM block containing private key")
+	}
+	return x509.ParsePKCS1PrivateKey(block.Bytes)
+}
+
+func LoadCertPool(cert  *x509.Certificate) *x509.CertPool {
+	pool := x509.NewCertPool()
+	// cert, err := LoadCertificate(filename)
+	// if err != nil {
+	// 	log.Fatalf("Failed to load certificate: %v", err)
+	// }
+	pool.AddCert(cert)
+	return pool
 }

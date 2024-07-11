@@ -93,7 +93,6 @@ func encodeStruct(encodedBytes *bytes.Buffer, val reflect.Value) error {
 	return nil
 }
 
-
 func Deserializer(data []byte, v interface{}) error {
 	buf := bytes.NewBuffer(data)
 	val := reflect.ValueOf(v)
@@ -192,10 +191,6 @@ func decodeStruct(buf *bytes.Buffer, val reflect.Value) error {
 	}
 	return nil
 }
-
-
-
-
 
 // Converts a time.Time object to a byte array
 func TimestampToBytes(t time.Time) ([]byte, error) {

@@ -1,11 +1,7 @@
 package test
 
 import (
-	"crypto/rsa"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
-	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -61,16 +57,17 @@ func TestServer(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Load client certificate and key
-	clientCert, err := loadCertificate(clientCertPath)
+	clientCert, err := certs.LoadCertificate(clientCertPath)
 	if err != nil {
 		t.Fatalf("Failed to load client certificate: %v", err)
 	}
-	clientKey, err := loadPrivateKey(clientKeyPath)
+	clientKey, err := certs.LoadPrivateKey(clientKeyPath)
 	if err != nil {
 		t.Fatalf("Failed to load client private key: %v", err)
 	}
 
 	// Create TLS configuration for client
+	caCert, _ = certs.LoadCertificate(caCertPath)
 	clientTLSConfig := &tls.Config{
 		Certificates: []tls.Certificate{
 			{
@@ -78,7 +75,7 @@ func TestServer(t *testing.T) {
 				PrivateKey:  clientKey,
 			},
 		},
-		RootCAs:    LoadCertPool(server.CACert),
+		RootCAs:    certs.LoadCertPool(caCert),
 		ServerName: "localhost", // Ensure the server name matches the certificate
 	}
 
@@ -151,16 +148,17 @@ func TestServerWithDifferentCA(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Load client certificate and key
-	clientCert, err := loadCertificate(clientCertPath)
+	clientCert, err := certs.LoadCertificate(clientCertPath)
 	if err != nil {
 		t.Fatalf("Failed to load client certificate: %v", err)
 	}
-	clientKey, err := loadPrivateKey(clientKeyPath)
+	clientKey, err := certs.LoadPrivateKey(clientKeyPath)
 	if err != nil {
 		t.Fatalf("Failed to load client private key: %v", err)
 	}
 
 	// Create TLS configuration for client
+	clientCACert, _ = certs.LoadCertificate(clientCACertPath)
 	clientTLSConfig := &tls.Config{
 		Certificates: []tls.Certificate{
 			{
@@ -168,8 +166,8 @@ func TestServerWithDifferentCA(t *testing.T) {
 				PrivateKey:  clientKey,
 			},
 		},
-		RootCAs: LoadCertPool(clientCACert),
-		InsecureSkipVerify: true,
+		RootCAs: certs.LoadCertPool(clientCACert),
+		InsecureSkipVerify: true, // Skip verification of server certificate
 	}
 
 	// Connect to server as client
@@ -182,33 +180,3 @@ func TestServerWithDifferentCA(t *testing.T) {
 	}
 }
 
-// Helper functions to load certificates and keys from files
-func loadCertificate(filename string) (*x509.Certificate, error) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, errors.New("failed to decode PEM block containing certificate")
-	}
-	return x509.ParseCertificate(block.Bytes)
-}
-
-func loadPrivateKey(filename string) (*rsa.PrivateKey, error) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, errors.New("failed to decode PEM block containing private key")
-	}
-	return x509.ParsePKCS1PrivateKey(block.Bytes)
-}
-
-func LoadCertPool(cert *x509.Certificate) *x509.CertPool {
-	pool := x509.NewCertPool()
-	pool.AddCert(cert)
-	return pool
-}

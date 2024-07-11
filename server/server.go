@@ -5,11 +5,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"log"
 	"net"
-	"os"
 	"sync"
+
+	"github.com/ulfaric/srmcp/certs"
 )
 
 // Client represents a connected client.
@@ -21,9 +21,9 @@ type Client struct {
 
 // Server represents a server with secured IP socket, control channel, and a list of connected clients.
 type Server struct {
-	Cert       *x509.Certificate
-	PrivateKey *rsa.PrivateKey
-	CACert     *x509.Certificate
+	Cert        *x509.Certificate
+	PrivateKey  *rsa.PrivateKey
+	CACert      *x509.Certificate
 	ControlConn net.Conn
 	Clients     map[string]*Client // Clients mapped by some identifier (e.g., IP address or client ID)
 	mu          sync.Mutex         // To ensure concurrent access to Clients map is safe
@@ -31,17 +31,17 @@ type Server struct {
 
 // NewServer creates a new Server instance by reading the certificate and key from files.
 func NewServer(certFile, keyFile, caCertFile string) (*Server, error) {
-	cert, err := loadCertificate(certFile)
+	cert, err := certs.LoadCertificate(certFile)
 	if err != nil {
 		return nil, err
 	}
 
-	key, err := loadPrivateKey(keyFile)
+	key, err := certs.LoadPrivateKey(keyFile)
 	if err != nil {
 		return nil, err
 	}
 
-	caCert, err := loadCertificate(caCertFile)
+	caCert, err := certs.LoadCertificate(caCertFile)
 	if err != nil {
 		return nil, err
 	}
@@ -88,10 +88,9 @@ func (s *Server) StartTLSListener(addr string) (net.Listener, error) {
 	}
 
 	tlsConfig := &tls.Config{
-		Certificates:             []tls.Certificate{cert},
-		ClientAuth:               tls.RequireAnyClientCert,
-		// ClientCAs:                LoadCertPool(s.CACert),
-		VerifyPeerCertificate:    s.verifyClientCertificate, // Custom verification
+		Certificates:       []tls.Certificate{cert},
+		ClientAuth:         tls.RequireAndVerifyClientCert,
+		ClientCAs:          certs.LoadCertPool(s.CACert),
 	}
 
 	listener, err := tls.Listen("tcp", addr, tlsConfig)
@@ -103,29 +102,29 @@ func (s *Server) StartTLSListener(addr string) (net.Listener, error) {
 }
 
 // verifyClientCertificate is a custom client certificate verification function.
-func (s *Server) verifyClientCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-	// Parse the client's certificate
-	clientCert, err := x509.ParseCertificate(rawCerts[0])
-	if err != nil {
-		return err
-	}
+// func (s *Server) verifyClientCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+// 	// Parse the client's certificate
+// 	clientCert, err := x509.ParseCertificate(rawCerts[0])
+// 	if err != nil {
+// 		return err
+// 	}
 
-	// Verify that the client's certificate was signed by the same CA
-	roots := x509.NewCertPool()
-	roots.AddCert(s.CACert)
-	opts := x509.VerifyOptions{
-		Roots: roots,
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	}
+// 	// Verify that the client's certificate was signed by the same CA
+// 	roots := x509.NewCertPool()
+// 	roots.AddCert(s.CACert)
+// 	opts := x509.VerifyOptions{
+// 		Roots: roots,
+// 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+// 	}
 
-	if _, err := clientCert.Verify(opts); err != nil {
-		// Return an error to terminate the connection without sending an alert
-		log.Printf("Connection refused: client certificate verification failed: %v", err)
-		return errors.New("client certificate verification failed")
-	}
+// 	if _, err := clientCert.Verify(opts); err != nil {
+// 		// Return an error to terminate the connection without sending an alert
+// 		log.Printf("Connection refused: client certificate verification failed: %v", err)
+// 		return errors.New("client certificate verification failed")
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // Run starts the server and listens for incoming TLS connections.
 func (s *Server) Run(addr string) {
@@ -172,41 +171,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	log.Printf("Client %s connected.", clientID)
 }
 
-// Helper functions to load certificates and keys from files
-func loadCertificate(filename string) (*x509.Certificate, error) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, errors.New("failed to decode PEM block containing certificate")
-	}
-	return x509.ParseCertificate(block.Bytes)
-}
-
-func loadPrivateKey(filename string) (*rsa.PrivateKey, error) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, errors.New("failed to decode PEM block containing private key")
-	}
-	return x509.ParsePKCS1PrivateKey(block.Bytes)
-}
-
 func EncodeCertificatePEM(cert *x509.Certificate) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
 }
 
 func EncodePrivateKeyPEM(key *rsa.PrivateKey) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-}
-
-func LoadCertPool(cert *x509.Certificate) *x509.CertPool {
-	pool := x509.NewCertPool()
-	pool.AddCert(cert)
-	return pool
 }
