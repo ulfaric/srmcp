@@ -9,18 +9,25 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/ulfaric/srmcp"
 	"github.com/ulfaric/srmcp/certs"
+	"github.com/ulfaric/srmcp/messages"
 )
 
 // ConnectedClient represents a connected client.
 type ConnectedClient struct {
-	ID       string
-	DataConn map[int]*tls.Conn
+	ID          string
+	Address     string
+	ControlConn *tls.Conn
+	DataConn    map[int]*tls.Conn
 }
 
 // Server represents a server with secured IP socket, control channel, and a list of connected clients.
 type Server struct {
+	ID 			string
 	Cert            *x509.Certificate
 	PrivateKey      *rsa.PrivateKey
 	CACert          *x509.Certificate
@@ -46,7 +53,10 @@ func NewServer(certFile, keyFile, caCertFile string) (*Server, error) {
 		return nil, err
 	}
 
+	id := uuid.New()
+
 	return &Server{
+		ID:         id.String(),
 		Cert:       cert,
 		PrivateKey: key,
 		CACert:     caCert,
@@ -99,22 +109,61 @@ func (s *Server) handleControlConn(conn net.Conn) {
 		return
 	}
 
+	log.Printf("Control Channel Handshake successful with Client at %s", tlsConn.RemoteAddr().String())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Clients[tlsConn.RemoteAddr().String()] = &ConnectedClient{
+		Address:     tlsConn.RemoteAddr().String(),
+		ControlConn: tlsConn,
+		DataConn:    make(map[int]*tls.Conn),
+	}
+	log.Printf("Client at %s connected", tlsConn.RemoteAddr().String())
+
 	for {
-		buf := make([]byte, 1024)
-		n, err := tlsConn.Read(buf)
+		headerBuffer := make([]byte, 88)
+		_, err := tlsConn.Read(headerBuffer)
 		if err != nil {
 			if err == io.EOF {
-				log.Printf("Client at %s closed connection", tlsConn.RemoteAddr().String())
+				log.Printf("Client at %s closed control connection", tlsConn.RemoteAddr().String())
 				return
 			}
 			log.Printf("Failed to read from client at %s: %v", tlsConn.RemoteAddr().String(), err)
 			return
 		}
-		log.Printf("Received %d bytes from client at %s: %s", n, tlsConn.RemoteAddr().String(), string(buf))
+		var header messages.Header
+		err = srmcp.Deserializer(headerBuffer, &header)
+		if err != nil {
+			log.Printf("Failed to deserialize message header: %v", err)
+		}
+
+		bodyBuffer := make([]byte, header.Length)
+		_, err = tlsConn.Read(bodyBuffer)
+		if err != nil {
+			log.Printf("Failed to read message body: %v", err)
+		}
+
+		switch header.MessageType {
+		case "HEL":
+			s.Clients[tlsConn.RemoteAddr().String()].ID = header.SenderID
+			log.Printf("Received HEL message from client %s", header.SenderID)
+			helloMessage := &messages.Header{
+				MessageType: "HEL",
+				SenderID:    s.ID,
+				Timestamp:   time.Now().Format(time.RFC3339Nano),
+				Length:      0,
+			}
+			bytes, err := srmcp.Serializer(helloMessage)
+			if err != nil {
+				log.Printf("Failed to serialize message header: %v", err)
+			}
+			_, err = tlsConn.Write(bytes)
+			if err != nil {
+				log.Printf("Failed to write to client at %s: %v", tlsConn.RemoteAddr().String(), err)
+			}
+		}
+
 	}
 }
-
-
 
 // Run starts the server by establishing the control connection.
 func (s *Server) Run(addr string) error {

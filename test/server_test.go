@@ -1,106 +1,81 @@
 package test
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"log"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/ulfaric/srmcp/certs"
+	"github.com/ulfaric/srmcp/client"
 	"github.com/ulfaric/srmcp/server"
 )
 
-func TestServer(t *testing.T) {
-	// Create a temporary directory to store certs and keys
-	dir, err := os.MkdirTemp("", "testcerts")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+func TestClientServerConnection(t *testing.T) {
+	// Generate CA, server, and client certificates
+	caCertPath := "ca_cert.pem"
+	caKeyPath := "ca_key.pem"
+	serverCertPath := "server_cert.pem"
+	serverKeyPath := "server_key.pem"
+	clientCertPath := "client_cert.pem"
+	clientKeyPath := "client_key.pem"
 
-	// Generate CA certificate and key
-	caCertPath := filepath.Join(dir, "ca_cert.pem")
-	caKeyPath := filepath.Join(dir, "ca_key.pem")
-	caCert, caKey, err := certs.CreateCA(caCertPath, caKeyPath, "Test CA", "US", 10)
+	caCert, caKey, err := certs.CreateCA(caCertPath, caKeyPath, "Test CA", "US", 1)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
 
-	// Generate server certificate and key
-	serverCertPath := filepath.Join(dir, "server_cert.pem")
-	serverKeyPath := filepath.Join(dir, "server_key.pem")
 	_, _, err = certs.CreateServerCert(caCert, caKey, serverCertPath, serverKeyPath, "Test Server", "US", 1, "localhost")
 	if err != nil {
 		t.Fatalf("Failed to create server certificate: %v", err)
 	}
 
-	// Generate client certificate and key
-	clientCertPath := filepath.Join(dir, "client_cert.pem")
-	clientKeyPath := filepath.Join(dir, "client_key.pem")
 	_, _, err = certs.CreateClientCert(caCert, caKey, clientCertPath, clientKeyPath, "Test Client", "US", 1, "localhost")
 	if err != nil {
 		t.Fatalf("Failed to create client certificate: %v", err)
 	}
 
-	// Create server instance
+	defer func() {
+		// Clean up generated files
+		os.Remove(caCertPath)
+		os.Remove(caKeyPath)
+		os.Remove(serverCertPath)
+		os.Remove(serverKeyPath)
+		os.Remove(clientCertPath)
+		os.Remove(clientKeyPath)
+	}()
+
+	// Start the server
 	srv, err := server.NewServer(serverCertPath, serverKeyPath, caCertPath)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	// Start server in a separate goroutine
+	serverAddr := "127.0.0.1:8080"
 	go func() {
-		if err := srv.Run("127.0.0.1:8888"); err != nil {
-			t.Errorf("Server failed to start: %v", err)
+		if err := srv.Run(serverAddr); err != nil {
+			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
-	// Allow server time to start
-	time.Sleep(2 * time.Second)
-
-	// Load client certificate
-	clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
-	if err != nil {
-		t.Fatalf("Failed to load client certificate: %v", err)
-	}
-
-	// Load CA certificate
-	caCertData, err := os.ReadFile(caCertPath)
-	if err != nil {
-		t.Fatalf("Failed to read CA certificate: %v", err)
-	}
-	caCertPool := x509.NewCertPool()
-	if ok := caCertPool.AppendCertsFromPEM(caCertData); !ok {
-		t.Fatalf("Failed to append CA certificate to pool")
-	}
-
-	// Setup TLS configuration for client
-	config := &tls.Config{
-		Certificates: []tls.Certificate{clientCert},
-		RootCAs:      caCertPool,
-	}
-
-	// Establish a TLS connection to the server
-	conn, err := tls.Dial("tcp", "127.0.0.1:8888", config)
-	if err != nil {
-		t.Fatalf("Failed to connect to server: %v", err)
-	}
-	defer conn.Close()
-
-	// Send a message to the server
-	message := "Hello, Server!"
-	_, err = conn.Write([]byte(message))
-	if err != nil {
-		t.Fatalf("Failed to write to server: %v", err)
-	}
-	conn.Close()
-	// Allow some time for server to process the message
+	// Give the server a moment to start
 	time.Sleep(1 * time.Second)
 
-	// Shut down the server
-	srv.Stop()
+	// Connect the client
+	clt, err := client.NewClient(clientCertPath, clientKeyPath, caCertPath)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
 
+	err = clt.Connect(serverAddr)
+	if err != nil {
+		t.Fatalf("Client failed to connect to server: %v", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	// Clean up
+	clt.Close(serverAddr)
+	time.Sleep(1 * time.Second)
+	srv.Stop()
 }
