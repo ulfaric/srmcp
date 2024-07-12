@@ -8,7 +8,8 @@ import (
 type Header struct {
 	MessageType string
 	SenderID    string
-	Timestamp   time.Time
+	Timestamp   string
+	Length      int32
 }
 
 // GetMessageType returns the message type
@@ -33,10 +34,24 @@ func (h *Header) SetSenderID(senderID string) {
 
 // GetTimestamp returns the timestamp
 func (h *Header) GetTimestamp() time.Time {
-	return h.Timestamp
+	time, err := time.Parse(time.RFC3339Nano, h.Timestamp)
+	if err != nil {
+		panic(err)
+	}
+	return time
 }
 
 // SetTimestamp sets the timestamp
 func (h *Header) SetTimestamp(timestamp time.Time) {
-	h.Timestamp = timestamp
+	h.Timestamp = timestamp.Format(time.RFC3339Nano)
+}
+
+// GetLength returns the length
+func (h *Header) GetLength() int32 {
+	return h.Length
+}
+
+// SetLength sets the length
+func (h *Header) SetLength(length int32) {
+	h.Length = length
 }

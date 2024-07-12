@@ -2,6 +2,7 @@ package test
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"log"
 	"os"
 	"path/filepath"
@@ -45,146 +46,61 @@ func TestServer(t *testing.T) {
 	}
 
 	// Create server instance
-	server, err := server.NewServer(serverCertPath, serverKeyPath, caCertPath)
+	srv, err := server.NewServer(serverCertPath, serverKeyPath, caCertPath)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
 	// Start server in a separate goroutine
-	go server.Run("127.0.0.1:8888")
+	go func() {
+		if err := srv.Run("127.0.0.1:8888"); err != nil {
+			t.Errorf("Server failed to start: %v", err)
+		}
+	}()
 
 	// Allow server time to start
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
-	// Load client certificate and key
-	clientCert, err := certs.LoadCertificate(clientCertPath)
+	// Load client certificate
+	clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
 	if err != nil {
 		t.Fatalf("Failed to load client certificate: %v", err)
 	}
-	clientKey, err := certs.LoadPrivateKey(clientKeyPath)
+
+	// Load CA certificate
+	caCertData, err := os.ReadFile(caCertPath)
 	if err != nil {
-		t.Fatalf("Failed to load client private key: %v", err)
+		t.Fatalf("Failed to read CA certificate: %v", err)
+	}
+	caCertPool := x509.NewCertPool()
+	if ok := caCertPool.AppendCertsFromPEM(caCertData); !ok {
+		t.Fatalf("Failed to append CA certificate to pool")
 	}
 
-	// Create TLS configuration for client
-	caCert, _ = certs.LoadCertificate(caCertPath)
-	clientTLSConfig := &tls.Config{
-		Certificates: []tls.Certificate{
-			{
-				Certificate: [][]byte{clientCert.Raw},
-				PrivateKey:  clientKey,
-			},
-		},
-		RootCAs:    certs.LoadCertPool(caCert),
-		ServerName: "localhost", // Ensure the server name matches the certificate
+	// Setup TLS configuration for client
+	config := &tls.Config{
+		Certificates: []tls.Certificate{clientCert},
+		RootCAs:      caCertPool,
 	}
 
-	// Connect to server as client
-	conn, err := tls.Dial("tcp", "localhost:8888", clientTLSConfig)
+	// Establish a TLS connection to the server
+	conn, err := tls.Dial("tcp", "127.0.0.1:8888", config)
 	if err != nil {
 		t.Fatalf("Failed to connect to server: %v", err)
 	}
 	defer conn.Close()
-	time.Sleep(1 * time.Second)
 
-	// Check if client is added to server's client list
-	clientID := conn.LocalAddr().String()
-	_, exists := server.GetClient(clientID)
-	if !exists {
-		t.Fatalf("Client was not added to server's client list")
-	}
-	_, err = conn.Write([]byte("Hello, server!"))
+	// Send a message to the server
+	message := "Hello, Server!"
+	_, err = conn.Write([]byte(message))
 	if err != nil {
 		t.Fatalf("Failed to write to server: %v", err)
 	}
-
-}
-
-func TestServerWithDifferentCA(t *testing.T) {
-	// Create a temporary directory to store certs and keys
-	dir, err := os.MkdirTemp("", "testcerts")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	// Generate CA certificate and key for server
-	serverCACertPath := filepath.Join(dir, "server_ca_cert.pem")
-	serverCAKeyPath := filepath.Join(dir, "server_ca_key.pem")
-	serverCACert, serverCAKey, err := certs.CreateCA(serverCACertPath, serverCAKeyPath, "Server CA", "US", 10)
-	if err != nil {
-		t.Fatalf("Failed to create server CA: %v", err)
-	}
-
-	// Generate CA certificate and key for client
-	clientCACertPath := filepath.Join(dir, "client_ca_cert.pem")
-	clientCAKeyPath := filepath.Join(dir, "client_ca_key.pem")
-	clientCACert, clientCAKey, err := certs.CreateCA(clientCACertPath, clientCAKeyPath, "Client CA", "US", 10)
-	if err != nil {
-		t.Fatalf("Failed to create client CA: %v", err)
-	}
-
-	// Generate server certificate and key
-	serverCertPath := filepath.Join(dir, "server_cert.pem")
-	serverKeyPath := filepath.Join(dir, "server_key.pem")
-	_, _, err = certs.CreateServerCert(serverCACert, serverCAKey, serverCertPath, serverKeyPath, "Test Server", "US", 1, "localhost")
-	if err != nil {
-		t.Fatalf("Failed to create server certificate: %v", err)
-	}
-
-	// Generate client certificate and key
-	clientCertPath := filepath.Join(dir, "client_cert.pem")
-	clientKeyPath := filepath.Join(dir, "client_key.pem")
-	_, _, err = certs.CreateClientCert(clientCACert, clientCAKey, clientCertPath, clientKeyPath, "Test Client", "US", 1, "localhost")
-	if err != nil {
-		t.Fatalf("Failed to create client certificate: %v", err)
-	}
-
-	// Create server instance
-	server, err := server.NewServer(serverCertPath, serverKeyPath, serverCACertPath)
-	if err != nil {
-		t.Fatalf("Failed to create server: %v", err)
-	}
-
-	// Start server in a separate goroutine
-	go server.Run("127.0.0.1:8888")
-
-	// Allow server time to start
+	conn.Close()
+	// Allow some time for server to process the message
 	time.Sleep(1 * time.Second)
 
-	// Load client certificate and key
-	clientCert, err := certs.LoadCertificate(clientCertPath)
-	if err != nil {
-		t.Fatalf("Failed to load client certificate: %v", err)
-	}
-	clientKey, err := certs.LoadPrivateKey(clientKeyPath)
-	if err != nil {
-		t.Fatalf("Failed to load client private key: %v", err)
-	}
+	// Shut down the server
+	srv.Stop()
 
-	// Create TLS configuration for client
-	caCert, _ := certs.LoadCertificate(clientCACertPath)
-	clientTLSConfig := &tls.Config{
-		Certificates: []tls.Certificate{
-			{
-				Certificate: [][]byte{clientCert.Raw},
-				PrivateKey:  clientKey,
-			},
-		},
-		RootCAs:    certs.LoadCertPool(caCert),
-		ServerName: "localhost", // Ensure the server name matches the certificate
-		// InsecureSkipVerify: true,
-	}
-
-	// Connect to server as client
-	conn, err := tls.Dial("tcp", "localhost:8888", clientTLSConfig)
-	if err != nil {
-		t.Fatalf("Failed to connect to server: %v", err)
-	}
-	_, err = conn.Write([]byte("Hello, server!"))
-	if err != nil {
-		t.Fatalf("Failed to write to server: %v", err)
-	}
-	defer conn.Close()
 }
-

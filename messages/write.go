@@ -12,12 +12,12 @@ type Write struct {
 }
 
 // Write message constructor
-func NewWrite(SenderID string, nodeID string, data interface{}, time time.Time) *Write {
+func NewWrite(SenderID string, nodeID string, data interface{}, t time.Time) *Write {
 	return &Write{
 		Header: Header{
 			MessageType: srmcp.Write,
 			SenderID:    SenderID,
-			Timestamp:   time,
+			Timestamp:   t.Format(time.RFC3339Nano),
 		},
 		NodeID: nodeID,
 		Data:   data,

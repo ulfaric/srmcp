@@ -16,12 +16,12 @@ type ServerInfo struct {
 }
 
 // ServerInfo message constructor
-func NewServerInfo(SenderID string, hostname string, numberOfNodes int, nodes []*node.Node, time time.Time) *ServerInfo {
+func NewServerInfo(SenderID string, hostname string, numberOfNodes int, nodes []*node.Node, t time.Time) *ServerInfo {
 	return &ServerInfo{
 		Header: Header{
 			MessageType: srmcp.ServerInfo,
 			SenderID:    SenderID,
-			Timestamp:   time,
+			Timestamp:   t.Format(time.RFC3339Nano),
 		},
 		Hostname:      hostname,
 		NumberOfNodes: numberOfNodes,

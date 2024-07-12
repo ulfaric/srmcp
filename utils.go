@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// Serializer serializes a struct into a byte slice
 func Serializer(v interface{}) ([]byte, error) {
 	var encodedBytes bytes.Buffer
 	val := reflect.ValueOf(v)
@@ -40,7 +41,7 @@ func Serializer(v interface{}) ([]byte, error) {
 func encodeField(encodedBytes *bytes.Buffer, field reflect.Value, fieldType reflect.Type) error {
 	switch fieldType.Kind() {
 	case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, 
 		reflect.Float32, reflect.Float64, reflect.Bool:
 		return binary.Write(encodedBytes, binary.BigEndian, field.Interface())
 
@@ -53,7 +54,7 @@ func encodeField(encodedBytes *bytes.Buffer, field reflect.Value, fieldType refl
 
 	case reflect.Struct:
 		if fieldType == reflect.TypeOf(time.Time{}) {
-			timeStr := field.Interface().(time.Time).Format(time.RFC3339)
+			timeStr := field.Interface().(time.Time).Format(time.RFC3339Nano)
 			strBytes := []byte(timeStr)
 			if err := binary.Write(encodedBytes, binary.BigEndian, int32(len(strBytes))); err != nil {
 				return err
@@ -93,6 +94,7 @@ func encodeStruct(encodedBytes *bytes.Buffer, val reflect.Value) error {
 	return nil
 }
 
+// Deserializer deserializes a byte slice into a struct
 func Deserializer(data []byte, v interface{}) error {
 	buf := bytes.NewBuffer(data)
 	val := reflect.ValueOf(v)
@@ -148,7 +150,7 @@ func decodeField(buf *bytes.Buffer, field reflect.Value, fieldType reflect.Type)
 			if _, err := buf.Read(strBytes); err != nil {
 				return err
 			}
-			t, err := time.Parse(time.RFC3339, string(strBytes))
+			t, err := time.Parse(time.RFC3339Nano, string(strBytes))
 			if err != nil {
 				return err
 			}

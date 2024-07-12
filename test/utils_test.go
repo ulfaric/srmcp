@@ -37,7 +37,7 @@ func TestSerialization(t *testing.T) {
         Age:      30,
         Name:     "Alice",
         Scores:   []int32{100, 95, 80},
-        Birthday: time.Date(1990, time.January, 1, 0, 0, 0, 0, time.UTC),
+        Birthday: time.Now(),
         Details: NestedStruct{
             ID:   1,
             Info: "Additional details",

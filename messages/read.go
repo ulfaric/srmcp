@@ -12,12 +12,12 @@ type Read struct {
 }
 
 // Read message constructor
-func NewRead(SenderID string, nodeID string, time time.Time) *Read {
+func NewRead(SenderID string, nodeID string, t time.Time) *Read {
 	return &Read{
 		Header: Header{
 			MessageType: srmcp.Read,
 			SenderID:    SenderID,
-			Timestamp:   time,
+			Timestamp:   t.Format(time.RFC3339Nano),
 		},
 		NodeID: nodeID,
 	}

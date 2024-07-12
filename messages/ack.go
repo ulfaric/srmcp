@@ -12,12 +12,12 @@ type ACK struct {
 }
 
 // Acknowledgement message constructor
-func NewACK(SenderID string, statusCode int, time time.Time) *ACK {
+func NewACK(SenderID string, statusCode int, t time.Time) *ACK {
 	return &ACK{
 		Header: Header{
 			MessageType: srmcp.ACK,
 			SenderID:    SenderID,
-			Timestamp:   time,
+			Timestamp:   t.Format(time.RFC3339Nano),
 		},
 		StatusCode: statusCode,
 	}
