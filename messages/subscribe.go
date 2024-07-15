@@ -1,74 +1,44 @@
 package messages
 
 import (
+	"time"
+
 	"github.com/ulfaric/srmcp"
-	"github.com/ulfaric/srmcp/node"
 )
 
-// Subscribe message
 type Subscribe struct {
-	Header   Header
-	Topic    string
-	Node     []*node.Node
-	Interval interface{}
-	Duration interface{}
+	Header Header
 }
 
-// Subscribe message constructor
-func NewSubscribe(SenderID string, topic string, nodes []*node.Node, interval interface{}, duration interface{}) *Subscribe {
+func NewSubscribe(SenderID string, t time.Time) *Subscribe {
 	return &Subscribe{
 		Header: Header{
 			MessageType: srmcp.Subscribe,
 			SenderID:    SenderID,
+			Timestamp:   t.Format(time.RFC3339Nano),
+			Length:      0,
 		},
-		Topic:    topic,
-		Node:     nodes,
-		Interval: interval,
-		Duration: duration,
 	}
 }
 
-// Get the header of the message
-func (subscribe *Subscribe) GetHeader() Header {
-	return subscribe.Header
+func (s *Subscribe) Encode() ([]byte, error) {
+	bytes, err := srmcp.Serializer(s)
+	if err != nil {
+		return nil, err
+	}
+	return bytes, nil
 }
 
-// Get the topic of the message
-func (subscribe *Subscribe) GetTopic() string {
-	return subscribe.Topic
+type SubscriptionResponse struct {
+	DataPort uint32
 }
 
-// Get the nodes in the message
-func (subscribe *Subscribe) GetNodes() []*node.Node {
-	return subscribe.Node
+func NewSubscriptionResponse(dataPort uint32) *SubscriptionResponse {
+	return &SubscriptionResponse{
+		DataPort: dataPort,
+	}
 }
 
-// Get the interval of the message
-func (subscribe *Subscribe) GetInterval() interface{} {
-	return subscribe.Interval
-}
-
-// Get the duration of the message
-func (subscribe *Subscribe) GetDuration() interface{} {
-	return subscribe.Duration
-}
-
-// Set the topic of the message
-func (subscribe *Subscribe) SetTopic(topic string) {
-	subscribe.Topic = topic
-}
-
-// Set the nodes in the message
-func (subscribe *Subscribe) SetNodes(nodes []*node.Node) {
-	subscribe.Node = nodes
-}
-
-// Set the interval of the message
-func (subscribe *Subscribe) SetInterval(interval interface{}) {
-	subscribe.Interval = interval
-}
-
-// Set the duration of the message
-func (subscribe *Subscribe) SetDuration(duration interface{}) {
-	subscribe.Duration = duration
+func (m *SubscriptionResponse) Encode() ([]byte, error) {
+	return srmcp.Serializer(m)
 }

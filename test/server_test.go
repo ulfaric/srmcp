@@ -46,14 +46,14 @@ func TestClientServerConnection(t *testing.T) {
 	}()
 
 	// Start the server
-	srv, err := server.NewServer(serverCertPath, serverKeyPath, caCertPath)
+	srv, err := server.NewServer(serverCertPath, serverKeyPath, caCertPath, "127.0.0.1", 8080)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
 	serverAddr := "127.0.0.1:8080"
 	go func() {
-		if err := srv.Run(serverAddr); err != nil {
+		if err := srv.Run(); err != nil {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()

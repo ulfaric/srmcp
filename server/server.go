@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -23,14 +24,18 @@ type ConnectedClient struct {
 	ID            string
 	Address       string
 	ControlConn   *tls.Conn
+	DataListener  net.Listener
 	DataConn      map[int]*tls.Conn
-	EncryptionKey []byte
+	ServerKey []byte
+	ClientKey []byte
 	mu            sync.Mutex
 }
 
 // Server represents a server with secured IP socket, control channel, and a list of connected clients.
 type Server struct {
 	ID              string
+	Address         string
+	Port            int
 	Cert            *x509.Certificate
 	PrivateKey      *rsa.PrivateKey
 	CACert          *x509.Certificate
@@ -40,7 +45,7 @@ type Server struct {
 }
 
 // NewServer creates a new Server instance by reading the certificate and key from files.
-func NewServer(certFile, keyFile, caCertFile string) (*Server, error) {
+func NewServer(certFile, keyFile, caCertFile, address string, port int) (*Server, error) {
 	cert, err := certs.LoadCertificate(certFile)
 	if err != nil {
 		return nil, err
@@ -60,6 +65,8 @@ func NewServer(certFile, keyFile, caCertFile string) (*Server, error) {
 
 	return &Server{
 		ID:         id.String(),
+		Address:   address,
+		Port:      port,
 		Cert:       cert,
 		PrivateKey: key,
 		CACert:     caCert,
@@ -67,7 +74,7 @@ func NewServer(certFile, keyFile, caCertFile string) (*Server, error) {
 	}, nil
 }
 
-func (s *Server) StartControlConn(addr string) error {
+func (s *Server) StartControlConn() error {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Cert.Raw})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(s.PrivateKey)})
 
@@ -83,6 +90,7 @@ func (s *Server) StartControlConn(addr string) error {
 	}
 	config.ClientCAs.AddCert(s.CACert)
 
+	addr := fmt.Sprintf("%s:%d", s.Address, s.Port)
 	listener, err := tls.Listen("tcp", addr, config)
 	if err != nil {
 		return err
@@ -94,6 +102,34 @@ func (s *Server) StartControlConn(addr string) error {
 	return nil
 }
 
+func (s *Server) StartDataConn(clientIndex string, dataport int) error {
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Cert.Raw})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(s.PrivateKey)})
+
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return err
+	}
+
+	config := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    x509.NewCertPool(),
+	}
+	config.ClientCAs.AddCert(s.CACert)
+
+	addr := fmt.Sprintf("%s:%d", s.Address, dataport)
+	listener, err := tls.Listen("tcp", addr, config)
+	if err != nil {
+		return err
+	}
+	s.Clients[clientIndex].DataListener = listener
+	log.Printf("Data channel listening on %s", addr)
+	go s.AcceptDataConn(clientIndex)
+
+	return nil
+}
+
 func (s *Server) AcceptControlConn() {
 	for {
 		conn, err := s.ControlListener.Accept()
@@ -101,6 +137,16 @@ func (s *Server) AcceptControlConn() {
 			return
 		}
 		go s.handleControlConn(conn)
+	}
+}
+
+func (s *Server) AcceptDataConn(clientIndex string) {
+	for {
+		conn, err := s.Clients[clientIndex].DataListener.Accept()
+		if err != nil {
+			return
+		}
+		go s.handleDataConn(conn)
 	}
 }
 
@@ -161,21 +207,36 @@ func (s *Server) handleControlConn(conn net.Conn) {
 			}
 			s.Clients[tlsConn.RemoteAddr().String()].mu.Lock()
 			defer s.Clients[tlsConn.RemoteAddr().String()].mu.Unlock()
-			s.Clients[tlsConn.RemoteAddr().String()].EncryptionKey = handshakeMessage.EncryptionKey
+			s.Clients[tlsConn.RemoteAddr().String()].ClientKey = handshakeMessage.EncryptionKey
 			log.Printf("Received HSH message from client %s, encryption key: %x", header.SenderID, handshakeMessage.EncryptionKey)
 			err = s.HandShake(tlsConn.RemoteAddr().String())
 			if err != nil {
 				log.Fatalf("Failed to send Handshake message to client at %s: %v", tlsConn.RemoteAddr().String(), err)
 			}
+		case srmcp.Subscribe:
+			log.Printf("Received SUB message from client %s", header.SenderID)
+			dataport := 40000+rand.Intn(50000-40000+1)
+			s.StartDataConn(tlsConn.RemoteAddr().String(), dataport)
+			s.RespSubscription(tlsConn.RemoteAddr().String(), dataport)
 		}
 
 	}
 }
 
+func (s *Server) handleDataConn(conn net.Conn) {
+	defer conn.Close()
+	tlsConn := conn.(*tls.Conn)
+	if err := tlsConn.Handshake(); err != nil {
+		log.Printf("Data Channel Handshake failed with Client at %s: %v", tlsConn.RemoteAddr().String(), err)
+		return
+	}
+	log.Printf("Data Channel Handshake successful with Client at %s", tlsConn.RemoteAddr().String())
+}
+
 // Run starts the server by establishing the control connection.
-func (s *Server) Run(addr string) error {
+func (s *Server) Run() error {
 	log.Println("Starting server...")
-	err := s.StartControlConn(addr)
+	err := s.StartControlConn()
 	if err != nil {
 		return err
 	}
@@ -209,6 +270,7 @@ func (s *Server) Hello(addr string) error {
 func (s *Server) HandShake(addr string) error {
 	// create a new encryption key
 	key, err := srmcp.GenerateRandomKey()
+	s.Clients[addr].ServerKey = key
 	log.Printf("Generated server encryption key: %x", key)
 	if err != nil {
 		return fmt.Errorf("failed to generate encryption key: %v", err)
@@ -220,7 +282,7 @@ func (s *Server) HandShake(addr string) error {
 		return fmt.Errorf("failed to serialize handshake message: %v", err)
 	}
 	//encrypt the handshake message body
-	encryptedBody, err := srmcp.Encrypt(s.Clients[addr].EncryptionKey, body)
+	encryptedBody, err := srmcp.Encrypt(s.Clients[addr].ClientKey, body)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt handshake message body: %v", err)
 	}
@@ -243,3 +305,35 @@ func (s *Server) HandShake(addr string) error {
 	}
 	return nil
 }
+
+func (s *Server) RespSubscription(clientIndex string, dataport int){
+	var bytes []byte
+	// create a new subscription response message with the data port
+	subscriptionResponse := messages.NewSubscriptionResponse(uint32(dataport))
+	body, err := subscriptionResponse.Encode()
+	if err != nil {
+		log.Fatalf("Failed to serialize subscription response message: %v", err)
+	}
+	encryptedBody, err := srmcp.Encrypt(s.Clients[clientIndex].ServerKey, body)
+	if err != nil {
+		log.Fatalf("Failed to encrypt subscription response message: %v", err)
+	}
+	header := messages.Header{
+		MessageType: srmcp.SubscriptionResponse,
+		SenderID:    s.ID,
+		Timestamp:   time.Now().Format(time.RFC3339Nano),
+		Length:      uint32(len(encryptedBody)),
+	}
+	headerBytes, err := srmcp.Serializer(header)
+	if err != nil {
+		log.Fatalf("Failed to serialize subscription response header: %v", err)
+	}
+	bytes = append(headerBytes, encryptedBody...)
+	// send the subscription response message to the client
+	_, err = s.Clients[clientIndex].ControlConn.Write(bytes)
+	if err != nil {
+		log.Fatalf("Failed to send subscription response message to client at %s: %v", s.Clients[clientIndex].Address, err)
+	}
+}
+
+

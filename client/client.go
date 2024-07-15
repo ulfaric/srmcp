@@ -22,7 +22,8 @@ type ConnectedServer struct {
 	Address       string
 	ControlConn   *tls.Conn
 	DataConn      map[int]*tls.Conn
-	EncryptionKey []byte
+	ServerKey []byte
+	ClientKey []byte
 	mu            sync.Mutex
 }
 
@@ -32,7 +33,6 @@ type Client struct {
 	PrivateKey    *rsa.PrivateKey
 	CACert        *x509.Certificate
 	Servers       map[string]*ConnectedServer
-	EncryptionKey []byte
 	mu            sync.Mutex
 }
 
@@ -121,10 +121,11 @@ func (c *Client) Hello(addr string) error {
 	return nil
 }
 
+// HandShake sends a HSH message to the server at the given address.
 func (c *Client) HandShake(addr string) error {
 	// create a new encryption key
 	key, err := srmcp.GenerateRandomKey()
-	c.EncryptionKey = key
+	c.Servers[addr].ClientKey = key
 	log.Printf("Generated client encryption key: %x", key)
 	if err != nil {
 		return fmt.Errorf("failed to generate encryption key: %v", err)
@@ -150,6 +151,19 @@ func (c *Client) HandShake(addr string) error {
 	_, err = c.Servers[addr].ControlConn.Write(bytes)
 	if err != nil {
 		return fmt.Errorf("failed to send handshake message to server: %v", err)
+	}
+	return nil
+}
+
+func (c *Client) Subscribe(addr string) error {
+	subscribeMessage := messages.NewSubscribe(c.ID, time.Now())
+	bytes, err := subscribeMessage.Encode()
+	if err != nil {
+		return fmt.Errorf("failed to serialize subscribe message: %v", err)
+	}
+	_, err = c.Servers[addr].ControlConn.Write(bytes)
+	if err != nil {
+		return fmt.Errorf("failed to send subscribe message to server: %v", err)
 	}
 	return nil
 }
@@ -183,7 +197,7 @@ func (c *Client) listenForServerControlMessages(conn *tls.Conn) {
 			c.Servers[conn.RemoteAddr().String()].ID = header.SenderID
 			log.Printf("Received HEL message from server %s", header.SenderID)
 		case srmcp.HandShake:
-			body, err := srmcp.Decrypt(c.EncryptionKey, bodyBuffer)
+			body, err := srmcp.Decrypt(c.Servers[conn.RemoteAddr().String()].ClientKey, bodyBuffer)
 			if err != nil {
 				log.Fatalf("Failed to decrypt handshake message: %v", err)
 			}
@@ -194,8 +208,21 @@ func (c *Client) listenForServerControlMessages(conn *tls.Conn) {
 			}
 			c.Servers[conn.RemoteAddr().String()].mu.Lock()
 			defer c.Servers[conn.RemoteAddr().String()].mu.Unlock()
-			c.Servers[conn.RemoteAddr().String()].EncryptionKey = handshakeMessage.EncryptionKey
+			c.Servers[conn.RemoteAddr().String()].ServerKey = handshakeMessage.EncryptionKey
 			log.Printf("Received HSH message from server %s, encryption key: %x", header.SenderID, handshakeMessage.EncryptionKey)
+			c.Subscribe(conn.RemoteAddr().String())
+		case srmcp.SubscriptionResponse:
+			log.Printf("Received SBR message from server %s", header.SenderID)
+			body, err := srmcp.Decrypt(c.Servers[conn.RemoteAddr().String()].ServerKey, bodyBuffer)
+			if err != nil {
+				log.Fatalf("Failed to decrypt subscription response message: %v", err)
+			}
+			var subscriptionResponse messages.SubscriptionResponse
+			err = srmcp.Deserializer(body, &subscriptionResponse)
+			if err != nil {
+				log.Fatalf("Failed to deserialize subscription response message: %v", err)
+			}
+			log.Printf("Subscription response: %d", subscriptionResponse.DataPort)
 		}
 
 	}
