@@ -3,6 +3,7 @@ package srmcp
 // MessageType constants
 const (
 	Hello       = "HEL"
+	HandShake   = "HSH"
 	ACK         = "ACK"
 	Discovery   = "DIS"
 	ServerInfo  = "SER"

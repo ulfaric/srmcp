@@ -9,7 +9,7 @@ type Header struct {
 	MessageType string
 	SenderID    string
 	Timestamp   string
-	Length      int32
+	Length      uint32
 }
 
 // GetMessageType returns the message type
@@ -47,11 +47,11 @@ func (h *Header) SetTimestamp(timestamp time.Time) {
 }
 
 // GetLength returns the length
-func (h *Header) GetLength() int32 {
+func (h *Header) GetLength() uint32 {
 	return h.Length
 }
 
 // SetLength sets the length
-func (h *Header) SetLength(length int32) {
+func (h *Header) SetLength(length uint32) {
 	h.Length = length
 }

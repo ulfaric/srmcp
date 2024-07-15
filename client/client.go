@@ -18,21 +18,25 @@ import (
 )
 
 type ConnectedServer struct {
-	ID          string
-	Address     string
-	ControlConn *tls.Conn
-	DataConn    map[int]*tls.Conn
+	ID            string
+	Address       string
+	ControlConn   *tls.Conn
+	DataConn      map[int]*tls.Conn
+	EncryptionKey []byte
+	mu            sync.Mutex
 }
 
 type Client struct {
-	ID         string
-	Cert       *x509.Certificate
-	PrivateKey *rsa.PrivateKey
-	CACert     *x509.Certificate
-	Servers    map[string]*ConnectedServer
-	mu         sync.Mutex
+	ID            string
+	Cert          *x509.Certificate
+	PrivateKey    *rsa.PrivateKey
+	CACert        *x509.Certificate
+	Servers       map[string]*ConnectedServer
+	EncryptionKey []byte
+	mu            sync.Mutex
 }
 
+// NewClient creates a new client with the given certificate, private key, and CA certificate.
 func NewClient(certFile, keyFile, caCertFile string) (*Client, error) {
 	cert, err := certs.LoadCertificate(certFile)
 	if err != nil {
@@ -60,62 +64,56 @@ func NewClient(certFile, keyFile, caCertFile string) (*Client, error) {
 	}, nil
 }
 
+// Connect connects the client to the server at the given address.
 func (c *Client) Connect(addr string) error {
+	// Create a new TLS connection to the server.
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Cert.Raw})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(c.PrivateKey)})
-
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return err
 	}
-
 	config := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      x509.NewCertPool(),
 	}
 	config.RootCAs.AddCert(c.CACert)
-
 	conn, err := tls.Dial("tcp", addr, config)
 	if err != nil {
-		log.Printf("failed to connect with server at %s: %v", addr, err)
+		log.Fatalf("failed to connect with server at %s: %v", addr, err)
 		return err
 	}
-
+	// Create a new ConnectedServer struct and add it to the client's map of servers.
 	connectedServer := &ConnectedServer{
 		Address:     addr,
 		ControlConn: conn,
 		DataConn:    make(map[int]*tls.Conn),
 	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Servers[addr] = connectedServer
 	log.Printf("Connected to server at %s", addr)
-
-	err = c.SendHello(addr)
+	// Start listening for control messages from the server.
+	go c.listenForServerControlMessages(conn)
+	// Send a Hello message to the server.
+	err = c.Hello(addr)
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("failed to send Hello message to server: %v", err)
 	}
-
-	go c.listenForServerControlMessages(conn)
 	return nil
-
 }
 
-func (c *Client) SendHello(addr string) (error) {
-	helloMessage := &messages.Header{
-		MessageType: "HEL",
-		SenderID:    c.ID,
-		Timestamp:   time.Now().Format(time.RFC3339Nano),
-		Length:      0,
-	}
-
-	bytes, err := srmcp.Serializer(helloMessage)
+// Hello sends a HEL message to the server at the given address.
+func (c *Client) Hello(addr string) error {
+	// Create a new Hello message with the client's ID and the current time.
+	helloMessage := messages.NewHello(c.ID, time.Now())
+	// Serialize the Hello message.
+	bytes, err := helloMessage.Encode()
 	if err != nil {
-		return fmt.Errorf("failed to serialize message: %v", err)
+		return fmt.Errorf("failed to serialize Hello message: %v", err)
 	}
-
+	// Send the Hello message to the server.
 	_, err = c.Servers[addr].ControlConn.Write(bytes)
 	if err != nil {
 		return fmt.Errorf("failed to send Hello message to server: %v", err)
@@ -123,6 +121,40 @@ func (c *Client) SendHello(addr string) (error) {
 	return nil
 }
 
+func (c *Client) HandShake(addr string) error {
+	// create a new encryption key
+	key, err := srmcp.GenerateRandomKey()
+	c.EncryptionKey = key
+	log.Printf("Generated client encryption key: %x", key)
+	if err != nil {
+		return fmt.Errorf("failed to generate encryption key: %v", err)
+	}
+	// create a new handshake message with the client's ID and the encryption key
+	handshakeMessage := messages.NewHandShake(key)
+	body, err := handshakeMessage.Encode()
+	if err != nil {
+		return fmt.Errorf("failed to serialize handshake message: %v", err)
+	}
+	header := messages.Header{
+		MessageType: srmcp.HandShake,
+		SenderID:    c.ID,
+		Timestamp:   time.Now().Format(time.RFC3339Nano),
+		Length:      uint32(len(body)),
+	}
+	headerBytes, err := srmcp.Serializer(header)
+	if err != nil {
+		return fmt.Errorf("failed to serialize handshake header: %v", err)
+	}
+	bytes := append(headerBytes, body...)
+	// send the handshake message to the server
+	_, err = c.Servers[addr].ControlConn.Write(bytes)
+	if err != nil {
+		return fmt.Errorf("failed to send handshake message to server: %v", err)
+	}
+	return nil
+}
+
+// listenForServerControlMessages listens for control messages from the server.
 func (c *Client) listenForServerControlMessages(conn *tls.Conn) {
 	for {
 		headerBuffer := make([]byte, 88)
@@ -137,24 +169,39 @@ func (c *Client) listenForServerControlMessages(conn *tls.Conn) {
 		var header messages.Header
 		err = srmcp.Deserializer(headerBuffer, &header)
 		if err != nil {
-			log.Printf("Failed to deserialize message header: %v", err)
+			log.Fatalf("Failed to deserialize message header: %v", err)
 		}
 
 		bodyBuffer := make([]byte, header.Length)
 		_, err = conn.Read(bodyBuffer)
 		if err != nil {
-			log.Printf("Failed to read message body: %v", err)
+			log.Fatalf("Failed to read message body: %v", err)
 		}
 
 		switch header.MessageType {
-		case "HEL":
+		case srmcp.Hello:
 			c.Servers[conn.RemoteAddr().String()].ID = header.SenderID
 			log.Printf("Received HEL message from server %s", header.SenderID)
+		case srmcp.HandShake:
+			body, err := srmcp.Decrypt(c.EncryptionKey, bodyBuffer)
+			if err != nil {
+				log.Fatalf("Failed to decrypt handshake message: %v", err)
+			}
+			var handshakeMessage messages.HandShake
+			err = srmcp.Deserializer(body, &handshakeMessage)
+			if err != nil {
+				log.Fatalf("Failed to deserialize handshake message: %v", err)
+			}
+			c.Servers[conn.RemoteAddr().String()].mu.Lock()
+			defer c.Servers[conn.RemoteAddr().String()].mu.Unlock()
+			c.Servers[conn.RemoteAddr().String()].EncryptionKey = handshakeMessage.EncryptionKey
+			log.Printf("Received HSH message from server %s, encryption key: %x", header.SenderID, handshakeMessage.EncryptionKey)
 		}
 
 	}
 }
 
+// Close closes the connection to the server at the given address.
 func (c *Client) Close(addr string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

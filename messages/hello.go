@@ -18,6 +18,15 @@ func NewHello(SenderID string, t time.Time) *Hello {
 			MessageType: srmcp.Hello,
 			SenderID:    SenderID,
 			Timestamp:   t.Format(time.RFC3339Nano),
+			Length:      0,
 		},
 	}
+}
+
+func (h *Hello) Encode() ([]byte, error) {
+	bytes, err := srmcp.Serializer(h)
+	if err != nil {
+		return nil, err
+	}
+	return bytes, nil
 }
