@@ -69,8 +69,8 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Clients[clientIndex] = &ConnectedClient{
-		ControlConn: tlsConn,
-		DataConn:    make(map[uint32]*tls.Conn),
+		ControlConn:  tlsConn,
+		DataConn:     make(map[uint32]*tls.Conn),
 	}
 	log.Printf("Client from %s connected", clientIndex)
 

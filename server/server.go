@@ -20,8 +20,7 @@ import (
 type ConnectedClient struct {
 	ID           string
 	ControlConn  *tls.Conn
-	DataListener net.Listener
-	DataConn     map[uint32]*tls.Conn
+	DataConn	 map[uint32]*tls.Conn
 	ServerKey    []byte
 	ClientKey    []byte
 	mu           sync.Mutex

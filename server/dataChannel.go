@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/ulfaric/srmcp"
 	"github.com/ulfaric/srmcp/messages"
@@ -35,31 +36,37 @@ func (s *Server) StartDataConn(clientIndex string, dataport uint32) error {
 	if err != nil {
 		return err
 	}
-	s.Clients[clientIndex].DataListener = listener
-	log.Printf("Data channel listening on %s", addr)
-	go s.AcceptDataConn(clientIndex)
+	log.Printf("New Datalink for client %s is listening on %s", s.Clients[clientIndex].ID, addr)
 
+	go s.AcceptDataConn(clientIndex, listener, dataport)
+	go func() {
+		time.Sleep(5 * time.Second)
+		err := listener.Close()
+		if err == nil {
+			log.Printf("Datalink listener on %s for client %s closed due to inactivity", listener.Addr().String(), s.Clients[clientIndex].ID)
+		}
+	}()
 	return nil
 }
 
 // AcceptDataConn accepts incoming data connections from clients.
-func (s *Server) AcceptDataConn(clientIndex string) {
-	for {
-		conn, err := s.Clients[clientIndex].DataListener.Accept()
-		if err != nil {
-			return
-		}
-		go s.HandleDataConn(conn, clientIndex)
+func (s *Server) AcceptDataConn(clientIndex string, listener net.Listener, dataport uint32) {
+	conn, err := listener.Accept()
+	if err != nil {
+		return
 	}
+	go s.HandleDataConn(conn, clientIndex, dataport)
+	listener.Close()
+	log.Printf("Datalink listener on %s accepted connection from client %s and closed", listener.Addr().String(), s.Clients[clientIndex].ID)
 }
 
 // HandleDataConn handles the data connection with the client.
-func (s *Server) HandleDataConn(conn net.Conn, clientIndex string) {
+func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint32) {
 	// TLS Handshake
 	defer func() {
 		conn.Close()
 		s.mu.Lock()
-		s.AvaliableDataPort = append(s.AvaliableDataPort, uint32(conn.RemoteAddr().(*net.TCPAddr).Port))
+		s.AvaliableDataPort = append(s.AvaliableDataPort, dataport)
 		s.mu.Unlock()
 	}()
 	tlsConn := conn.(*tls.Conn)
@@ -71,9 +78,9 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string) {
 
 	// Add the data connection to the client's data connection map
 	s.Clients[clientIndex].mu.Lock()
-	s.Clients[clientIndex].DataConn[uint32(tlsConn.RemoteAddr().(*net.TCPAddr).Port)] = tlsConn
+	s.Clients[clientIndex].DataConn[dataport] = tlsConn
 	s.Clients[clientIndex].mu.Unlock()
-	log.Printf("Client %s connected to data channel", s.Clients[clientIndex].ID)
+	log.Printf("Client %s connected to data channel on %s", s.Clients[clientIndex].ID, tlsConn.RemoteAddr().String())
 
 	// Read data from the client
 	for {
@@ -81,7 +88,7 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string) {
 		_, err := tlsConn.Read(headerBuffer)
 		if err != nil {
 			if err == io.EOF {
-				log.Printf("Client %s closed datalink connection", s.Clients[clientIndex].ID)
+				log.Printf("Client %s closed datalink connection on %s", s.Clients[clientIndex].ID, tlsConn.RemoteAddr().String())
 				return
 			}
 			log.Printf("Failed to read from client %s on datalink %s: %v", s.Clients[clientIndex].ID, tlsConn.RemoteAddr().String(), err)

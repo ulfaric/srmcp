@@ -86,7 +86,7 @@ func TestClientServerConnection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Client failed to request datalink: %v", err)
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 
 	// Clean up
