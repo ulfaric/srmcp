@@ -82,19 +82,19 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 				log.Printf("Client %s closed control connection", s.Clients[clientIndex].ID)
 				return
 			}
-			log.Fatalf("Failed to read from client %s: %v", s.Clients[clientIndex].ID, err)
+			log.Printf("Failed to read from client %s: %v", s.Clients[clientIndex].ID, err)
 			return
 		}
 		var header messages.Header
 		err = srmcp.Deserializer(headerBuffer, &header)
 		if err != nil {
-			log.Fatalf("Failed to deserialize message header: %v", err)
+			log.Printf("Failed to deserialize message header: %v", err)
 		}
 
 		bodyBuffer := make([]byte, header.Length)
 		_, err = tlsConn.Read(bodyBuffer)
 		if err != nil {
-			log.Fatalf("Failed to read message body: %v", err)
+			log.Printf("Failed to read message body: %v", err)
 		}
 
 		switch header.MessageType {
@@ -124,7 +124,7 @@ func (s *Server) HandleHandShake(bodyBuffer []byte, clientIndex string, header m
 	var handshakeMessage messages.HandShake
 	err := srmcp.Deserializer(bodyBuffer, &handshakeMessage)
 	if err != nil {
-		log.Fatalf("Failed to deserialize handshake message: %v", err)
+		log.Printf("Failed to deserialize handshake message: %v", err)
 	}
 	s.Clients[clientIndex].mu.Lock()
 	s.Clients[clientIndex].ClientKey = handshakeMessage.EncryptionKey
@@ -132,7 +132,7 @@ func (s *Server) HandleHandShake(bodyBuffer []byte, clientIndex string, header m
 	log.Printf("Received HSH message from client %s, encryption key: %x", header.SenderID, handshakeMessage.EncryptionKey)
 	err = s.HandShake(clientIndex)
 	if err != nil {
-		log.Fatalf("Failed to send Handshake message to client %s: %v", s.Clients[clientIndex].ID, err)
+		log.Printf("Failed to send Handshake message to client %s: %v", s.Clients[clientIndex].ID, err)
 	}
 }
 
@@ -144,7 +144,7 @@ func (s *Server) HandleHello(clientIndex string, header messages.Header) {
 	log.Printf("Received HEL message from client %s", header.SenderID)
 	err := s.Hello(clientIndex)
 	if err != nil {
-		log.Fatalf("Failed to send Hello message to client %s: %v", s.Clients[clientIndex].ID, err)
+		log.Printf("Failed to send Hello message to client %s: %v", s.Clients[clientIndex].ID, err)
 	}
 }
 
@@ -195,11 +195,11 @@ func (s *Server) DataLinkRep(clientIndex string, dataport uint32) {
 	subscriptionResponse := messages.NewDataLinkRep(uint32(dataport))
 	body, err := subscriptionResponse.Encode()
 	if err != nil {
-		log.Fatalf("Failed to serialize subscription response message: %v", err)
+		log.Printf("Failed to serialize subscription response message: %v", err)
 	}
 	encryptedBody, err := srmcp.Encrypt(s.Clients[clientIndex].ServerKey, body)
 	if err != nil {
-		log.Fatalf("Failed to encrypt subscription response message: %v", err)
+		log.Printf("Failed to encrypt subscription response message: %v", err)
 	}
 	header := messages.Header{
 		MessageType: srmcp.DataLinkRep,
@@ -209,12 +209,12 @@ func (s *Server) DataLinkRep(clientIndex string, dataport uint32) {
 	}
 	headerBytes, err := srmcp.Serializer(header)
 	if err != nil {
-		log.Fatalf("Failed to serialize subscription response header: %v", err)
+		log.Printf("Failed to serialize subscription response header: %v", err)
 	}
 	bytes = append(headerBytes, encryptedBody...)
 	// send the subscription response message to the client
 	_, err = s.Clients[clientIndex].ControlConn.Write(bytes)
 	if err != nil {
-		log.Fatalf("Failed to send subscription response message to client %s: %v", s.Clients[clientIndex].ID, err)
+		log.Printf("Failed to send subscription response message to client %s: %v", s.Clients[clientIndex].ID, err)
 	}
 }

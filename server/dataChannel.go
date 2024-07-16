@@ -84,13 +84,13 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string) {
 				log.Printf("Client %s closed datalink connection", s.Clients[clientIndex].ID)
 				return
 			}
-			log.Fatalf("Failed to read from client %s on datalink %s: %v", s.Clients[clientIndex].ID, tlsConn.RemoteAddr().String(), err)
+			log.Printf("Failed to read from client %s on datalink %s: %v", s.Clients[clientIndex].ID, tlsConn.RemoteAddr().String(), err)
 			return
 		}
 		var header messages.Header
 		err = srmcp.Deserializer(headerBuffer, &header)
 		if err != nil {
-			log.Fatalf("Failed to deserialize message header: %v", err)
+			log.Printf("Failed to deserialize message header: %v", err)
 		}
 
 	}

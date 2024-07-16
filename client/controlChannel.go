@@ -27,13 +27,13 @@ func (c *Client) ListenForServerControlMessages(conn *tls.Conn) {
 		var header messages.Header
 		err = srmcp.Deserializer(headerBuffer, &header)
 		if err != nil {
-			log.Fatalf("Failed to deserialize message header: %v", err)
+			log.Printf("Failed to deserialize message header: %v", err)
 		}
 
 		bodyBuffer := make([]byte, header.Length)
 		_, err = conn.Read(bodyBuffer)
 		if err != nil {
-			log.Fatalf("Failed to read message body: %v", err)
+			log.Printf("Failed to read message body: %v", err)
 		}
 
 		switch header.MessageType {
@@ -77,14 +77,14 @@ func (c *Client) handleHandShake(conn *tls.Conn, header messages.Header, bodyBuf
 	// Decrypt the message body using the client's private key.
 	body, err := srmcp.Decrypt(server.ClientKey, bodyBuffer)
 	if err != nil {
-		log.Fatalf("Failed to decrypt handshake message: %v", err)
+		log.Printf("Failed to decrypt handshake message: %v", err)
 		return
 	}
 	// Deserialize the decrypted message body.
 	var handshakeMessage messages.HandShake
 	err = srmcp.Deserializer(body, &handshakeMessage)
 	if err != nil {
-		log.Fatalf("Failed to deserialize handshake message: %v", err)
+		log.Printf("Failed to deserialize handshake message: %v", err)
 		return
 	}
 	// Store the server's encryption key.
@@ -92,8 +92,6 @@ func (c *Client) handleHandShake(conn *tls.Conn, header messages.Header, bodyBuf
 	defer c.mu.Unlock()
 	server.ServerKey = handshakeMessage.EncryptionKey
 	log.Printf("Received HSH message from server %s, encryption key: %x", header.SenderID, handshakeMessage.EncryptionKey)
-	// Send a datalink request to the server.
-	c.ReqDataLink(serverIndex)
 }
 
 // handleDataLinkRep handles a DLP message from a server.
@@ -109,13 +107,13 @@ func (c *Client) handleDataLinkRep(conn *tls.Conn, header messages.Header, bodyB
 
 	body, err := srmcp.Decrypt(server.ServerKey, bodyBuffer)
 	if err != nil {
-		log.Fatalf("Failed to decrypt datalink response message: %v", err)
+		log.Printf("Failed to decrypt datalink response message: %v", err)
 		return
 	}
 	var dataLinkRep messages.DataLinkRep
 	err = srmcp.Deserializer(body, &dataLinkRep)
 	if err != nil {
-		log.Fatalf("Failed to deserialize datalink response message: %v", err)
+		log.Printf("Failed to deserialize datalink response message: %v", err)
 		return
 	}
 	log.Printf("Received DLP message from server %s, DataPort: %d", header.SenderID, dataLinkRep.DataPort)
@@ -138,7 +136,7 @@ func (c *Client) ConnectDataLink(serverIndex string, port uint32) error {
 	serverDataLinkAddr := fmt.Sprintf("%s:%d", c.Servers[serverIndex].Address, port)
 	conn, err := tls.Dial("tcp", serverDataLinkAddr, config)
 	if err != nil {
-		log.Fatalf("failed to connect with server %s datalink on %s: %v", c.Servers[serverIndex].ID, serverDataLinkAddr, err)
+		log.Printf("failed to connect with server %s datalink on %s: %v", c.Servers[serverIndex].ID, serverDataLinkAddr, err)
 		return err
 	}
 
