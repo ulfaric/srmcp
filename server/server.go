@@ -21,14 +21,14 @@ import (
 
 // ConnectedClient represents a connected client.
 type ConnectedClient struct {
-	ID            string
-	Address       string
-	ControlConn   *tls.Conn
-	DataListener  net.Listener
-	DataConn      map[int]*tls.Conn
-	ServerKey []byte
-	ClientKey []byte
-	mu            sync.Mutex
+	ID           string
+	Address      string
+	ControlConn  *tls.Conn
+	DataListener net.Listener
+	DataConn     map[uint32]*tls.Conn
+	ServerKey    []byte
+	ClientKey    []byte
+	mu           sync.Mutex
 }
 
 // Server represents a server with secured IP socket, control channel, and a list of connected clients.
@@ -65,8 +65,8 @@ func NewServer(certFile, keyFile, caCertFile, address string, port int) (*Server
 
 	return &Server{
 		ID:         id.String(),
-		Address:   address,
-		Port:      port,
+		Address:    address,
+		Port:       port,
 		Cert:       cert,
 		PrivateKey: key,
 		CACert:     caCert,
@@ -74,6 +74,7 @@ func NewServer(certFile, keyFile, caCertFile, address string, port int) (*Server
 	}, nil
 }
 
+// StartControlConn starts the control connection by listening on the server's address and port.
 func (s *Server) StartControlConn() error {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Cert.Raw})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(s.PrivateKey)})
@@ -102,55 +103,19 @@ func (s *Server) StartControlConn() error {
 	return nil
 }
 
-func (s *Server) StartDataConn(clientIndex string, dataport int) error {
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Cert.Raw})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(s.PrivateKey)})
-
-	cert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return err
-	}
-
-	config := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    x509.NewCertPool(),
-	}
-	config.ClientCAs.AddCert(s.CACert)
-
-	addr := fmt.Sprintf("%s:%d", s.Address, dataport)
-	listener, err := tls.Listen("tcp", addr, config)
-	if err != nil {
-		return err
-	}
-	s.Clients[clientIndex].DataListener = listener
-	log.Printf("Data channel listening on %s", addr)
-	go s.AcceptDataConn(clientIndex)
-
-	return nil
-}
-
+// AcceptControlConn accepts incoming control connections from clients.
 func (s *Server) AcceptControlConn() {
 	for {
 		conn, err := s.ControlListener.Accept()
 		if err != nil {
 			return
 		}
-		go s.handleControlConn(conn)
+		go s.HandleControlConn(conn)
 	}
 }
 
-func (s *Server) AcceptDataConn(clientIndex string) {
-	for {
-		conn, err := s.Clients[clientIndex].DataListener.Accept()
-		if err != nil {
-			return
-		}
-		go s.handleDataConn(conn)
-	}
-}
-
-func (s *Server) handleControlConn(conn net.Conn) {
+// HandleControlConn handles the control connection with the client.
+func (s *Server) HandleControlConn(conn net.Conn) {
 	defer conn.Close()
 	tlsConn := conn.(*tls.Conn)
 	if err := tlsConn.Handshake(); err != nil {
@@ -164,7 +129,7 @@ func (s *Server) handleControlConn(conn net.Conn) {
 	s.Clients[tlsConn.RemoteAddr().String()] = &ConnectedClient{
 		Address:     tlsConn.RemoteAddr().String(),
 		ControlConn: tlsConn,
-		DataConn:    make(map[int]*tls.Conn),
+		DataConn:    make(map[uint32]*tls.Conn),
 	}
 	log.Printf("Client at %s connected", tlsConn.RemoteAddr().String())
 
@@ -193,37 +158,98 @@ func (s *Server) handleControlConn(conn net.Conn) {
 
 		switch header.MessageType {
 		case srmcp.Hello:
-			s.Clients[tlsConn.RemoteAddr().String()].ID = header.SenderID
-			log.Printf("Received HEL message from client %s", header.SenderID)
-			err = s.Hello(tlsConn.RemoteAddr().String())
-			if err != nil {
-				log.Fatalf("Failed to send Hello message to client at %s: %v", tlsConn.RemoteAddr().String(), err)
-			}
+			s.HandleHello(tlsConn, header)
 		case srmcp.HandShake:
-			var handshakeMessage messages.HandShake
-			err = srmcp.Deserializer(bodyBuffer, &handshakeMessage)
-			if err != nil {
-				log.Fatalf("Failed to deserialize handshake message: %v", err)
-			}
-			s.Clients[tlsConn.RemoteAddr().String()].mu.Lock()
-			defer s.Clients[tlsConn.RemoteAddr().String()].mu.Unlock()
-			s.Clients[tlsConn.RemoteAddr().String()].ClientKey = handshakeMessage.EncryptionKey
-			log.Printf("Received HSH message from client %s, encryption key: %x", header.SenderID, handshakeMessage.EncryptionKey)
-			err = s.HandShake(tlsConn.RemoteAddr().String())
-			if err != nil {
-				log.Fatalf("Failed to send Handshake message to client at %s: %v", tlsConn.RemoteAddr().String(), err)
-			}
-		case srmcp.Subscribe:
-			log.Printf("Received SUB message from client %s", header.SenderID)
-			dataport := 40000+rand.Intn(50000-40000+1)
-			s.StartDataConn(tlsConn.RemoteAddr().String(), dataport)
-			s.RespSubscription(tlsConn.RemoteAddr().String(), dataport)
+			s.HandleHandShake(bodyBuffer, tlsConn, header)
+		case srmcp.DataLinkReq:
+			s.HandleDateLinkReq(header, tlsConn)
+		default:
+			log.Printf("Received unknown message type from client %s", header.SenderID)
 		}
 
 	}
 }
 
-func (s *Server) handleDataConn(conn net.Conn) {
+// HandleDateLinkReq handles the DLR message from the client.
+func (s *Server) HandleDateLinkReq(header messages.Header, tlsConn *tls.Conn) {
+	log.Printf("Received DLR message from client %s", header.SenderID)
+	dataport := 40000 + rand.Intn(50000-40000+1)
+	s.StartDataConn(tlsConn.RemoteAddr().String(), dataport)
+	s.DataLinkRep(tlsConn.RemoteAddr().String(), dataport)
+}
+
+// HandleHandShake handles the HSH message from the client.
+func (s *Server) HandleHandShake(bodyBuffer []byte, tlsConn *tls.Conn, header messages.Header) {
+	var handshakeMessage messages.HandShake
+	err := srmcp.Deserializer(bodyBuffer, &handshakeMessage)
+	if err != nil {
+		log.Fatalf("Failed to deserialize handshake message: %v", err)
+	}
+	s.Clients[tlsConn.RemoteAddr().String()].mu.Lock()
+	s.Clients[tlsConn.RemoteAddr().String()].ClientKey = handshakeMessage.EncryptionKey
+	s.Clients[tlsConn.RemoteAddr().String()].mu.Unlock()
+	log.Printf("Received HSH message from client %s, encryption key: %x", header.SenderID, handshakeMessage.EncryptionKey)
+	err = s.HandShake(tlsConn.RemoteAddr().String())
+	if err != nil {
+		log.Fatalf("Failed to send Handshake message to client at %s: %v", tlsConn.RemoteAddr().String(), err)
+	}
+}
+
+// HandleHello handles the HEL message from the client.
+func (s *Server) HandleHello(tlsConn *tls.Conn, header messages.Header) {
+	s.Clients[tlsConn.RemoteAddr().String()].mu.Lock()
+	s.Clients[tlsConn.RemoteAddr().String()].ID = header.SenderID
+	s.Clients[tlsConn.RemoteAddr().String()].mu.Unlock()
+	log.Printf("Received HEL message from client %s", header.SenderID)
+	err := s.Hello(tlsConn.RemoteAddr().String())
+	if err != nil {
+		log.Fatalf("Failed to send Hello message to client at %s: %v", tlsConn.RemoteAddr().String(), err)
+	}
+}
+
+// StartDataConn starts the data connection by listening on the server's address and a random port.
+func (s *Server) StartDataConn(clientIndex string, dataport int) error {
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Cert.Raw})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(s.PrivateKey)})
+
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return err
+	}
+
+	config := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    x509.NewCertPool(),
+	}
+	config.ClientCAs.AddCert(s.CACert)
+
+	addr := fmt.Sprintf("%s:%d", s.Address, dataport)
+	listener, err := tls.Listen("tcp", addr, config)
+	if err != nil {
+		return err
+	}
+	s.Clients[clientIndex].DataListener = listener
+	log.Printf("Data channel listening on %s", addr)
+	go s.AcceptDataConn(clientIndex)
+
+	return nil
+}
+
+// AcceptDataConn accepts incoming data connections from clients.
+func (s *Server) AcceptDataConn(clientIndex string) {
+	for {
+		conn, err := s.Clients[clientIndex].DataListener.Accept()
+		if err != nil {
+			return
+		}
+		go s.HandleDataConn(conn, clientIndex)
+	}
+}
+
+// HandleDataConn handles the data connection with the client.
+func (s *Server) HandleDataConn(conn net.Conn, clientIndex string) {
+	// TLS Handshake
 	defer conn.Close()
 	tlsConn := conn.(*tls.Conn)
 	if err := tlsConn.Handshake(); err != nil {
@@ -231,6 +257,32 @@ func (s *Server) handleDataConn(conn net.Conn) {
 		return
 	}
 	log.Printf("Data Channel Handshake successful with Client at %s", tlsConn.RemoteAddr().String())
+
+	// Add the data connection to the client's data connection map
+	s.Clients[clientIndex].mu.Lock()
+	s.Clients[clientIndex].DataConn[uint32(tlsConn.RemoteAddr().(*net.TCPAddr).Port)] = tlsConn
+	s.Clients[clientIndex].mu.Unlock()
+	log.Printf("Client at %s connected to data channel", clientIndex)
+
+	// Read data from the client
+	for {
+		headerBuffer := make([]byte, 88)
+		_, err := tlsConn.Read(headerBuffer)
+		if err != nil {
+			if err == io.EOF {
+				log.Printf("Client at %s closed datalink connection", tlsConn.RemoteAddr().String())
+				return
+			}
+			log.Fatalf("Failed to read from client at %s: %v", tlsConn.RemoteAddr().String(), err)
+			return
+		}
+		var header messages.Header
+		err = srmcp.Deserializer(headerBuffer, &header)
+		if err != nil {
+			log.Fatalf("Failed to deserialize message header: %v", err)
+		}
+
+	}
 }
 
 // Run starts the server by establishing the control connection.
@@ -267,6 +319,7 @@ func (s *Server) Hello(addr string) error {
 	return nil
 }
 
+// HandShake sends a HSH message to the client at the given address.
 func (s *Server) HandShake(addr string) error {
 	// create a new encryption key
 	key, err := srmcp.GenerateRandomKey()
@@ -306,10 +359,11 @@ func (s *Server) HandShake(addr string) error {
 	return nil
 }
 
-func (s *Server) RespSubscription(clientIndex string, dataport int){
+// DataLinkRep sends a DLR message to the client at the given address.
+func (s *Server) DataLinkRep(clientIndex string, dataport int) {
 	var bytes []byte
 	// create a new subscription response message with the data port
-	subscriptionResponse := messages.NewSubscriptionResponse(uint32(dataport))
+	subscriptionResponse := messages.NewDataLinkRep(uint32(dataport))
 	body, err := subscriptionResponse.Encode()
 	if err != nil {
 		log.Fatalf("Failed to serialize subscription response message: %v", err)
@@ -319,7 +373,7 @@ func (s *Server) RespSubscription(clientIndex string, dataport int){
 		log.Fatalf("Failed to encrypt subscription response message: %v", err)
 	}
 	header := messages.Header{
-		MessageType: srmcp.SubscriptionResponse,
+		MessageType: srmcp.DataLinkRep,
 		SenderID:    s.ID,
 		Timestamp:   time.Now().Format(time.RFC3339Nano),
 		Length:      uint32(len(encryptedBody)),
@@ -335,5 +389,3 @@ func (s *Server) RespSubscription(clientIndex string, dataport int){
 		log.Fatalf("Failed to send subscription response message to client at %s: %v", s.Clients[clientIndex].Address, err)
 	}
 }
-
-

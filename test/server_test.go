@@ -67,7 +67,7 @@ func TestClientServerConnection(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	err = clt.Connect(serverAddr)
+	err = clt.Connect("127.0.0.1", uint32(8080))
 	if err != nil {
 		t.Fatalf("Client failed to connect to server: %v", err)
 	}
