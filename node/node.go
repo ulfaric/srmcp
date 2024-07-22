@@ -4,9 +4,19 @@ import (
 	"sync"
 )
 
+type NodeInfo struct {
+	ID       string
+	Name     string
+	Length   uint32
+	Desc     string
+	Parent   map[string]*NodeInfo
+	Children map[string]*NodeInfo
+}
+
 type Node struct {
 	ID       string
 	Name     string
+	Length   uint32
 	Value    interface{}
 	Desc     string
 	Parent   map[string]*Node
@@ -89,4 +99,30 @@ func (n *Node) GetParents() map[string]*Node {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.Parent
+}
+
+// GetNodeInfo returns the node information of the current node.
+func GetNodeInfo(node *Node) *NodeInfo {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	// Convert Parent and Children maps to NodeInfo maps recursively
+	parentInfo := make(map[string]*NodeInfo)
+	for k, v := range node.Parent {
+		parentInfo[k] = GetNodeInfo(v)
+	}
+
+	childrenInfo := make(map[string]*NodeInfo)
+	for k, v := range node.Children {
+		childrenInfo[k] = GetNodeInfo(v)
+	}
+
+	return &NodeInfo{
+		ID:       node.ID,
+		Name:     node.Name,
+		Length:   node.Length,
+		Desc:     node.Desc,
+		Parent:   parentInfo,
+		Children: childrenInfo,
+	}
 }
