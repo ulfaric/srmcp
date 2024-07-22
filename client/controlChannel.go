@@ -3,6 +3,8 @@ package client
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -13,32 +15,53 @@ import (
 	"github.com/ulfaric/srmcp/messages"
 )
 
+func HandleMessage(conn *tls.Conn) (*messages.Header, []byte, error) {
+	// Read the pre-header
+	preHeaderBuffer := make([]byte, 8)
+	if _, err := io.ReadFull(conn, preHeaderBuffer); err != nil {
+		log.Printf("Failed to read pre-header: %v", err)
+		return nil, nil, err
+	}
+
+	// Extract the header and body lengths
+	headerLength := binary.BigEndian.Uint32(preHeaderBuffer[:4])
+	bodyLength := binary.BigEndian.Uint32(preHeaderBuffer[4:])
+
+	// Read the header
+	headerBuffer := make([]byte, headerLength)
+	if _, err := io.ReadFull(conn, headerBuffer); err != nil {
+		log.Printf("Failed to read header: %v", err)
+		return nil, nil, err
+	}
+
+	// Deserialize the header
+	var header messages.Header
+	if err := json.Unmarshal(headerBuffer, &header); err != nil {
+		log.Printf("Failed to deserialize message header: %v", err)
+		return nil, nil, err
+	}
+
+	// Read the body
+	bodyBuffer := make([]byte, bodyLength)
+	if _, err := io.ReadFull(conn, bodyBuffer); err != nil {
+		log.Printf("Failed to read message body: %v", err)
+		return nil, nil, err
+	}
+
+	return &header, bodyBuffer, nil
+}
+
+
 func (c *Client) ListenForServerControlMessages(conn *tls.Conn) {
 	for {
-		headerBuffer := make([]byte, 88)
-		_, err := conn.Read(headerBuffer)
+		header, bodyBuffer, err := HandleMessage(conn)
 		if err != nil {
-			if err == io.EOF {
-				log.Printf("Server at %s closed control connection", conn.RemoteAddr().String())
-				return
-			}
+			log.Printf("Failed to handle message: %v", err)
 			return
 		}
-		var header messages.Header
-		err = srmcp.Deserializer(headerBuffer, &header)
-		if err != nil {
-			log.Printf("Failed to deserialize message header: %v", err)
-		}
-
-		bodyBuffer := make([]byte, header.Length)
-		_, err = conn.Read(bodyBuffer)
-		if err != nil {
-			log.Printf("Failed to read message body: %v", err)
-		}
-
 		switch header.MessageType {
 		case srmcp.Hello:
-			c.handleHello(conn, header)
+			c.handleHello(conn, *header)
 		case srmcp.HandShake:
 			c.handleHandShake(conn, header, bodyBuffer)
 		case srmcp.DataLinkRep:
