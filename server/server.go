@@ -91,6 +91,12 @@ func (s *Server) Run() error {
 func (s *Server) Stop() {
 	log.Println("Shutting down server...")
 	s.ControlListener.Close()
+	for _, client := range s.Clients {
+		client.ControlConn.Close()
+		for _, conn := range client.DataConn {
+			conn.Close()
+		}
+	}
 	log.Println("Server has been shut down.")
 }
 
