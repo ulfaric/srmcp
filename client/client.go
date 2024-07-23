@@ -9,19 +9,21 @@ import (
 	"log"
 	"sync"
 
+	"github.com/cloudflare/circl/kem/kyber/kyber1024"
 	"github.com/google/uuid"
 	"github.com/ulfaric/srmcp/certs"
 )
 
 type ConnectedServer struct {
-	ID          string
-	Address     string
-	Port        uint32
-	ControlConn *tls.Conn
-	DataConn    map[uint32]*tls.Conn
-	ServerKey   []byte
-	ClientKey   []byte
-	mu          sync.Mutex
+	ID           string
+	Address      string
+	Port         uint32
+	ControlConn  *tls.Conn
+	DataConn     map[uint32]*tls.Conn
+	PublicKey    *kyber1024.PublicKey
+	PrivateKey   *kyber1024.PrivateKey
+	SharedSecret []byte
+	mu           sync.Mutex
 }
 
 type Client struct {
@@ -95,7 +97,7 @@ func (c *Client) Connect(addr string, port uint32) error {
 	c.Servers[serverIndex] = connectedServer
 	log.Printf("Connected to server at %s", addr)
 	// Start listening for control messages from the server.
-	go c.ListenForServerControlMessages(conn)
+	go c.HandleControlConn(conn)
 	// Send a Hello message to the server.
 	err = c.Hello(serverIndex)
 	if err != nil {

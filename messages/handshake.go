@@ -1,20 +1,9 @@
 package messages
 
-import (
-	"github.com/ulfaric/srmcp"
-)
-
-type HandShake struct{
-	EncryptionKey []byte
+type HandShake struct {
+	PublicKey []byte `validate:"required"`
 }
 
-func NewHandShake(key []byte) *HandShake {
-	return &HandShake{
-		EncryptionKey: key,
-	}
+type HandShakeResponse struct {
+	CipherText []byte `validate:"required"`
 }
-
-func (h *HandShake) Encode() ([]byte, error) {
-	return srmcp.Serializer(h)
-}
-

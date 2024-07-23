@@ -4,12 +4,8 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/tls"
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 )
 
 // // Serializer serializes a struct into a byte slice

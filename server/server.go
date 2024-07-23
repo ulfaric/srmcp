@@ -4,15 +4,13 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"log"
 	"net"
 	"sync"
-	"time"
 
+	"github.com/cloudflare/circl/kem/kyber/kyber1024"
 	"github.com/google/uuid"
 	"github.com/ulfaric/srmcp/certs"
-	"github.com/ulfaric/srmcp/messages"
 	"github.com/ulfaric/srmcp/node"
 )
 
@@ -21,8 +19,8 @@ type ConnectedClient struct {
 	ID           string
 	ControlConn  *tls.Conn
 	DataConn	 map[uint32]*tls.Conn
-	ServerKey    []byte
-	ClientKey    []byte
+	SharedSecret []byte
+	PublicKey    *kyber1024.PublicKey
 	mu           sync.Mutex
 }
 
@@ -98,23 +96,6 @@ func (s *Server) Stop() {
 		}
 	}
 	log.Println("Server has been shut down.")
-}
-
-// Hello sends a HEL message to the server at the given address.
-func (s *Server) Hello(addr string) error {
-	// Create a new Hello message with the client's ID and the current time.
-	helloMessage := messages.NewHello(s.ID, time.Now())
-	// Serialize the Hello message.
-	bytes, err := helloMessage.Encode()
-	if err != nil {
-		return fmt.Errorf("failed to serialize Hello message: %v", err)
-	}
-	// Send the Hello message to the server.
-	_, err = s.Clients[addr].ControlConn.Write(bytes)
-	if err != nil {
-		return fmt.Errorf("failed to send Hello message to server: %v", err)
-	}
-	return nil
 }
 
 // AddNode adds a new node to the server's node list.
