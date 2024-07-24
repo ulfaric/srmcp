@@ -116,6 +116,7 @@ func (c *Client) handleHello(serverIndex string, header *messages.Header) {
 	log.Printf("Received HEL message from server %s", header.SenderID)
 }
 
+// HandShake sends a HSH message to the server which contains the kypber public key of the client.
 func (c *Client) HandShake(serverIndex string) error {
 	// Preparing the header
 	header := messages.Header{
@@ -166,6 +167,7 @@ func (c *Client) HandShake(serverIndex string) error {
 	return nil
 }
 
+// HandShake handles a HSH message from a server to extract the shared secret of kypber KEM.
 func (c *Client) HandleHandShake(serverIndex string, header *messages.Header, bodybuffer []byte){
 	var handshakeResponse messages.HandShakeResponse
 	err := json.Unmarshal(bodybuffer, &handshakeResponse)
@@ -180,6 +182,8 @@ func (c *Client) HandleHandShake(serverIndex string, header *messages.Header, bo
 	c.Servers[serverIndex].mu.Unlock()
 	log.Printf("Received HSH response from server %s, encryption key: %x", header.SenderID, sharedSecrete)
 }
+
+
 
 // // handleHandShake handles a HSH message from a server.
 // func (c *Client) handleHandShake(conn *tls.Conn, header messages.Header, bodyBuffer []byte) {
