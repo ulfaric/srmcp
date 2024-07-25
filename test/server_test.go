@@ -73,13 +73,6 @@ func TestClientServerConnection(t *testing.T) {
 	}
 	time.Sleep(1 * time.Second)
 
-	// Handshake
-	err = clt.HandShake(serverAddr)
-	if err != nil {
-		t.Fatalf("Client failed to handshake with server: %v", err)
-	}
-	time.Sleep(1 * time.Second)
-
 	// // Request datalink
 	// for i := 0; i < 10; i++ {
 	// 	err = clt.ReqDataLink(serverAddr)

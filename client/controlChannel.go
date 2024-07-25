@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"time"
 
 	"github.com/cloudflare/circl/kem/kyber/kyber1024"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/ulfaric/srmcp"
 	"github.com/ulfaric/srmcp/messages"
 )
@@ -61,16 +61,11 @@ func (c *Client) HandleControlConn(conn *tls.Conn) {
 	for {
 		header, body, err := DigestMessage(conn)
 		if err == nil {
-			switch header.MessageType {
-			case srmcp.Hello:
-				c.handleHello(serverIndex, header)
-			case srmcp.HandShake:
-				c.HandleHandShake(serverIndex, header, body)
-			// case srmcp.DataLinkRep:
-			// 	c.handleDataLinkRep(conn, header, bodyBuffer)
-			default:
-				log.Printf("Received unknown message type from server %s: %s", header.SenderID, header.MessageType)
-			}
+			c.Servers[serverIndex].mu.Lock()
+			c.Servers[serverIndex].Transactions[header.TransactionID].ResponseHeader = append(c.Servers[serverIndex].Transactions[header.TransactionID].ResponseHeader, header)
+			c.Servers[serverIndex].Transactions[header.TransactionID].ResponseBody = append(c.Servers[serverIndex].Transactions[header.TransactionID].ResponseBody, body)
+			c.Servers[serverIndex].mu.Unlock()
+
 		} else {
 			continue
 		}
@@ -80,9 +75,10 @@ func (c *Client) HandleControlConn(conn *tls.Conn) {
 // Hello sends a HEL message to the server.
 func (c *Client) Hello(serverIndex string) error {
 	header := messages.Header{
-		MessageType: srmcp.Hello,
-		SenderID:    c.ID,
-		Timestamp:   time.Now(),
+		MessageType:   srmcp.Hello,
+		SenderID:      c.ID,
+		Timestamp:     time.Now(),
+		TransactionID: uuid.New().String(),
 	}
 	headerBytes, err := json.Marshal(header)
 	if err != nil {
@@ -100,29 +96,19 @@ func (c *Client) Hello(serverIndex string) error {
 	if err != nil {
 		return fmt.Errorf("failed to send Hello message to server at %s: %v", serverIndex, err)
 	}
+	transaction := NewTransaction(c, serverIndex, &header, nil, 100)
+	c.Servers[serverIndex].Transactions[transaction.ID] = transaction
 	return nil
-}
-
-// handleHello handles a HEL message from a server.
-func (c *Client) handleHello(serverIndex string, header *messages.Header) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	server, ok := c.Servers[serverIndex]
-	if !ok {
-		log.Printf("Server at %s not found", serverIndex)
-		return
-	}
-	server.ID = header.SenderID
-	log.Printf("Received HEL message from server %s", header.SenderID)
 }
 
 // HandShake sends a HSH message to the server which contains the kypber public key of the client.
 func (c *Client) HandShake(serverIndex string) error {
 	// Preparing the header
 	header := messages.Header{
-		MessageType: srmcp.HandShake,
-		SenderID:    c.ID,
-		Timestamp:   time.Now(),
+		MessageType:   srmcp.HandShake,
+		SenderID:      c.ID,
+		Timestamp:     time.Now(),
+		TransactionID: uuid.New().String(),
 	}
 	headerBytes, err := json.Marshal(header)
 	if err != nil {
@@ -161,29 +147,38 @@ func (c *Client) HandShake(serverIndex string) error {
 	bytes := append(preHeaderBytes, headerBytes...)
 	bytes = append(bytes, bodyBytes...)
 	_, err = c.Servers[serverIndex].ControlConn.Write(bytes)
-	if err != nil {	
+	if err != nil {
 		return fmt.Errorf("failed to send HandShake message to server at %s: %v", serverIndex, err)
 	}
+	transaction := NewTransaction(c, serverIndex, &header, bodyBytes, 100)
+	c.Servers[serverIndex].Transactions[transaction.ID] = transaction
 	return nil
 }
 
-// HandShake handles a HSH message from a server to extract the shared secret of kypber KEM.
-func (c *Client) HandleHandShake(serverIndex string, header *messages.Header, bodybuffer []byte){
-	var handshakeResponse messages.HandShakeResponse
-	err := json.Unmarshal(bodybuffer, &handshakeResponse)
-	if err != nil {
-		log.Printf("Failed to deserialize HandShake message body: %v", err)
-		return
+func (c *Client) RequestDataLink(serverIndex string) error {
+	header := messages.Header{
+		MessageType: srmcp.DataLinkReq,
+		SenderID:    c.ID,
+		Timestamp:   time.Now(),
 	}
-	sharedSecrete := make([]byte, kyber1024.SharedKeySize)
-	c.Servers[serverIndex].PrivateKey.DecapsulateTo(sharedSecrete, handshakeResponse.CipherText)
-	c.Servers[serverIndex].mu.Lock()
-	c.Servers[serverIndex].SharedSecret = sharedSecrete
-	c.Servers[serverIndex].mu.Unlock()
-	log.Printf("Received HSH response from server %s, encryption key: %x", header.SenderID, sharedSecrete)
+	headerBytes, err := json.Marshal(header)
+	if err != nil {
+		return fmt.Errorf("failed to serialize DataLinkReq message header: %v", err)
+	}
+
+	preHeader := messages.PreHeader{
+		HeaderLength: uint32(len(headerBytes)),
+		BodyLength:   0,
+	}
+	preHeaderBytes := preHeader.Serialize()
+
+	bytes := append(preHeaderBytes, headerBytes...)
+	_, err = c.Servers[serverIndex].ControlConn.Write(bytes)
+	if err != nil {
+		return fmt.Errorf("failed to send DataLinkReq message to server at %s: %v", serverIndex, err)
+	}
+	return nil
 }
-
-
 
 // // handleHandShake handles a HSH message from a server.
 // func (c *Client) handleHandShake(conn *tls.Conn, header messages.Header, bodyBuffer []byte) {

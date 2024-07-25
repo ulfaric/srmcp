@@ -23,6 +23,7 @@ type ConnectedServer struct {
 	PublicKey    *kyber1024.PublicKey
 	PrivateKey   *kyber1024.PrivateKey
 	SharedSecret []byte
+	Transactions map[string]*Transaction
 	mu           sync.Mutex
 }
 
@@ -90,6 +91,7 @@ func (c *Client) Connect(addr string, port uint32) error {
 		Port:        port,
 		ControlConn: conn,
 		DataConn:    make(map[uint32]*tls.Conn),
+		Transactions: make(map[string]*Transaction),
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -103,6 +105,11 @@ func (c *Client) Connect(addr string, port uint32) error {
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("failed to send Hello message to server: %v", err)
+	}
+	err = c.HandShake(serverIndex)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to send HandShake message to server: %v", err)
 	}
 	return nil
 }

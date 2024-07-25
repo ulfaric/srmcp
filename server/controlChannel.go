@@ -91,9 +91,10 @@ func (s *Server) AcceptControlConn() {
 	for {
 		conn, err := s.ControlListener.Accept()
 		if err != nil {
-			return
+			continue
+		} else {
+			go s.HandleControlConn(conn)
 		}
-		go s.HandleControlConn(conn)
 	}
 }
 
@@ -137,13 +138,14 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 }
 
 // Hello sends a HEL message to the client.
-func (s *Server) Hello(clientIndex string) error {
-	header := messages.Header{
+func (s *Server) Hello(clientIndex string, header *messages.Header) error {
+	repHeader := messages.Header{
 		MessageType: srmcp.Hello,
 		SenderID:    s.ID,
 		Timestamp:   time.Now(),
+		TransactionID: header.TransactionID,
 	}
-	headerBytes, err := json.Marshal(header)
+	headerBytes, err := json.Marshal(repHeader)
 	if err != nil {
 		log.Printf("Failed to serialize Hello message header: %v", err)
 	}
@@ -168,7 +170,7 @@ func (s *Server) HandleHello(clientIndex string, header *messages.Header) {
 	s.Clients[clientIndex].ID = header.SenderID
 	s.Clients[clientIndex].mu.Unlock()
 	log.Printf("Received HEL message from client %s", header.SenderID)
-	err := s.Hello(clientIndex)
+	err := s.Hello(clientIndex, header)
 	if err != nil {
 		log.Print(err)
 	}
@@ -206,6 +208,7 @@ func (s *Server) HandleHandShake(clientIndex string, header *messages.Header, bo
 		MessageType: srmcp.HandShake,
 		SenderID:    s.ID,
 		Timestamp:   time.Now(),
+		TransactionID: header.TransactionID,
 	}
 	headerBytes, err := json.Marshal(reponseHeader)
 	if err != nil {
