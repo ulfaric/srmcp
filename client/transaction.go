@@ -141,6 +141,7 @@ func (t *Transaction) HandleDataLinkRep() {
 			t.Error = err
 			t.Completed = true
 			log.Printf("Failed to decrypt data link response from server %s", t.Client.Servers[t.ServerIndex].ID)
+			return
 		}
 		dataport := binary.BigEndian.Uint32(dataportBytes)
 		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: t.Client.Cert.Raw})
@@ -162,6 +163,7 @@ func (t *Transaction) HandleDataLinkRep() {
 			t.Error = err
 			t.Completed = true
 			log.Printf("Failed to connect to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
+			return
 		}
 		t.Client.Servers[t.ServerIndex].mu.Lock()
 		t.Client.Servers[t.ServerIndex].DataConn = append(t.Client.Servers[t.ServerIndex].DataConn, conn)
@@ -188,7 +190,14 @@ func (t *Transaction) HandleDiscovery(){
 			continue
 		}
 
-		log.Printf("Received Discovery message from server %s", t.Client.Servers[t.ServerIndex].ID)
+		decryptedBody, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, t.ResponseBody[0])
+		if err != nil {
+			t.Error = err
+			t.Completed = true
+			log.Printf("Failed to decrypt discovery response from server %s", t.Client.Servers[t.ServerIndex].ID)
+			return
+		}
+		log.Printf("Received discovery response from server %s: %s", t.Client.Servers[t.ServerIndex].ID, decryptedBody)
 		t.Completed = true
 		return
 	}

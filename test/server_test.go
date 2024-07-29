@@ -50,6 +50,7 @@ func TestClientServerConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
+	srv.AddNode("testNode", 0)
 
 	serverAddr := "127.0.0.1:8080"
 	go func() {
