@@ -70,38 +70,17 @@ func (t *Transaction) Process() {
 			return
 		}
 		switch t.RequestHeader.MessageType {
-		case srmcp.Hello:
-			t.handleHello()
 		case srmcp.HandShake:
 			t.HandleHandShake()
 		case srmcp.DataLinkReq:
 			t.HandleDataLinkRep()
+		case srmcp.Discovery:
+			t.HandleDiscovery()
 		default:
 			t.Error = errors.New("unknown message type")
 			t.Completed = true
 			log.Printf("Unknown message type")
 		}
-	}
-}
-
-// HandleHello handles a HEL message from a server.
-func (t *Transaction) handleHello() {
-	for {
-
-		if t.Completed {
-			return
-		}
-
-		if len(t.ResponseHeader) == 0 {
-			continue
-		}
-
-		t.Client.Servers[t.ServerIndex].mu.Lock()
-		defer t.Client.Servers[t.ServerIndex].mu.Unlock()
-		t.Client.Servers[t.ServerIndex].ID = t.ResponseHeader[0].SenderID
-		t.Completed = true
-		log.Printf("Received HEL message from server %s", t.Client.Servers[t.ServerIndex].ID)
-		return
 	}
 }
 
@@ -119,6 +98,10 @@ func (t *Transaction) HandleHandShake() {
 		if len(t.ResponseBody) == 0 {
 			continue
 		}
+
+		t.Client.Servers[t.ServerIndex].mu.Lock()
+		t.Client.Servers[t.ServerIndex].ID = t.ResponseHeader[0].SenderID
+		t.Client.Servers[t.ServerIndex].mu.Unlock()
 
 		var handshakeMessage messages.HandShakeResponse
 		err := json.Unmarshal(t.ResponseBody[0], &handshakeMessage)
@@ -138,6 +121,7 @@ func (t *Transaction) HandleHandShake() {
 	}
 }
 
+// HandleDataLinkRep handles a DLR message from a server.
 func (t *Transaction) HandleDataLinkRep() {
 	for {
 		if t.Completed {
@@ -180,11 +164,32 @@ func (t *Transaction) HandleDataLinkRep() {
 			log.Printf("Failed to connect to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
 		}
 		t.Client.Servers[t.ServerIndex].mu.Lock()
-		t.Client.Servers[t.ServerIndex].DataConn[dataport] = conn
+		t.Client.Servers[t.ServerIndex].DataConn = append(t.Client.Servers[t.ServerIndex].DataConn, conn)
 		t.Client.Servers[t.ServerIndex].mu.Unlock()
 		t.Completed = true
 		log.Printf("Connected to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
+		go t.Client.HandleDataConn(conn, t.ServerIndex)
 		return
 	}
 
+}
+
+func (t *Transaction) HandleDiscovery(){
+	for {
+		if t.Completed {
+			return
+		}
+
+		if len(t.ResponseHeader) == 0 {
+			continue
+		}
+
+		if len(t.ResponseBody) == 0 {
+			continue
+		}
+
+		log.Printf("Received Discovery message from server %s", t.Client.Servers[t.ServerIndex].ID)
+		t.Completed = true
+		return
+	}
 }

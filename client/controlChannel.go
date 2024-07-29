@@ -72,35 +72,6 @@ func (c *Client) HandleControlConn(conn *tls.Conn) {
 	}
 }
 
-// Hello sends a HEL message to the server.
-func (c *Client) Hello(serverIndex string) error {
-	header := messages.Header{
-		MessageType:   srmcp.Hello,
-		SenderID:      c.ID,
-		Timestamp:     time.Now(),
-		TransactionID: uuid.New().String(),
-	}
-	headerBytes, err := json.Marshal(header)
-	if err != nil {
-		return fmt.Errorf("failed to serialize Hello message header: %v", err)
-	}
-
-	preHeader := messages.PreHeader{
-		HeaderLength: uint32(len(headerBytes)),
-		BodyLength:   0,
-	}
-	preHeaderBytes := preHeader.Serialize()
-
-	bytes := append(preHeaderBytes, headerBytes...)
-	_, err = c.Servers[serverIndex].ControlConn.Write(bytes)
-	if err != nil {
-		return fmt.Errorf("failed to send Hello message to server at %s: %v", serverIndex, err)
-	}
-	transaction := NewTransaction(c, serverIndex, &header, nil, 100)
-	c.Servers[serverIndex].Transactions[transaction.ID] = transaction
-	return nil
-}
-
 // HandShake sends a HSH message to the server which contains the kypber public key of the client.
 func (c *Client) HandShake(serverIndex string) error {
 	// Preparing the header

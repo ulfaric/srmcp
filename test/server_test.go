@@ -73,7 +73,12 @@ func TestClientServerConnection(t *testing.T) {
 	}
 	time.Sleep(1 * time.Second)
 
+	// Request a data link
 	clt.RequestDataLink(serverAddr)
+	time.Sleep(1 * time.Second)
+
+	// Send a discovery message
+	clt.GetNodes(serverAddr)
 	time.Sleep(1 * time.Second)
 
 	// Clean up

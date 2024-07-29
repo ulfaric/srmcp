@@ -12,6 +12,7 @@ import (
 	"github.com/cloudflare/circl/kem/kyber/kyber1024"
 	"github.com/google/uuid"
 	"github.com/ulfaric/srmcp/certs"
+	"github.com/ulfaric/srmcp/node"
 )
 
 type ConnectedServer struct {
@@ -19,11 +20,12 @@ type ConnectedServer struct {
 	Address      string
 	Port         uint32
 	ControlConn  *tls.Conn
-	DataConn     map[uint32]*tls.Conn
+	DataConn     []*tls.Conn
 	PublicKey    *kyber1024.PublicKey
 	PrivateKey   *kyber1024.PrivateKey
 	SharedSecret []byte
 	Transactions map[string]*Transaction
+	Nodes        map[string]*node.Node
 	mu           sync.Mutex
 }
 
@@ -87,11 +89,12 @@ func (c *Client) Connect(addr string, port uint32) error {
 	}
 	// Create a new ConnectedServer struct and add it to the client's map of servers.
 	connectedServer := &ConnectedServer{
-		Address:     addr,
-		Port:        port,
-		ControlConn: conn,
-		DataConn:    make(map[uint32]*tls.Conn),
+		Address:      addr,
+		Port:         port,
+		ControlConn:  conn,
+		DataConn:     make([]*tls.Conn, 0),
 		Transactions: make(map[string]*Transaction),
+		Nodes:        make(map[string]*node.Node),
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -100,12 +103,7 @@ func (c *Client) Connect(addr string, port uint32) error {
 	log.Printf("Connected to server at %s", addr)
 	// Start listening for control messages from the server.
 	go c.HandleControlConn(conn)
-	// Send a Hello message to the server.
-	err = c.Hello(serverIndex)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to send Hello message to server: %v", err)
-	}
+	// Send a Handshake message to the server.
 	err = c.HandShake(serverIndex)
 	if err != nil {
 		conn.Close()

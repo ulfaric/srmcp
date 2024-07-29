@@ -1,14 +1,16 @@
 package node
 
 import (
+	"reflect"
 	"sync"
 )
 
 type NodeInfo struct {
-	ID       string
-	Name     string
-	Length   uint32
-	Desc     string
+	ID       string `validate:"required"`
+	Name     string `validate:"required"`
+	Length   uint32 `validate:"required"`
+	Type	 string `validate:"required"`
+	Desc     string 
 	Parent   map[string]*NodeInfo
 	Children map[string]*NodeInfo
 }
@@ -121,6 +123,7 @@ func GetNodeInfo(node *Node) *NodeInfo {
 		ID:       node.ID,
 		Name:     node.Name,
 		Length:   node.Length,
+		Type:     reflect.TypeOf(node.Value).String(),
 		Desc:     node.Desc,
 		Parent:   parentInfo,
 		Children: childrenInfo,

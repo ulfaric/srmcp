@@ -18,7 +18,7 @@ import (
 type ConnectedClient struct {
 	ID           string
 	ControlConn  *tls.Conn
-	DataConn	 map[uint32]*tls.Conn
+	DataConn	 []*tls.Conn
 	SharedSecret []byte
 	PublicKey    *kyber1024.PublicKey
 	mu           sync.Mutex
