@@ -73,14 +73,8 @@ func TestClientServerConnection(t *testing.T) {
 	}
 	time.Sleep(1 * time.Second)
 
-	// // Request datalink
-	// for i := 0; i < 10; i++ {
-	// 	err = clt.ReqDataLink(serverAddr)
-	// 	if err != nil {
-	// 		t.Fatalf("Client failed to request datalink: %v", err)
-	// 	}
-	// 	time.Sleep(1 * time.Second)
-	// }
+	clt.RequestDataLink(serverAddr)
+	time.Sleep(1 * time.Second)
 
 	// Clean up
 	clt.Close(serverAddr)

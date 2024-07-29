@@ -160,6 +160,7 @@ func (c *Client) RequestDataLink(serverIndex string) error {
 		MessageType: srmcp.DataLinkReq,
 		SenderID:    c.ID,
 		Timestamp:   time.Now(),
+		TransactionID: uuid.New().String(),
 	}
 	headerBytes, err := json.Marshal(header)
 	if err != nil {
@@ -173,10 +174,13 @@ func (c *Client) RequestDataLink(serverIndex string) error {
 	preHeaderBytes := preHeader.Serialize()
 
 	bytes := append(preHeaderBytes, headerBytes...)
+
 	_, err = c.Servers[serverIndex].ControlConn.Write(bytes)
 	if err != nil {
 		return fmt.Errorf("failed to send DataLinkReq message to server at %s: %v", serverIndex, err)
 	}
+	transaction := NewTransaction(c, serverIndex, &header, nil, 100)
+	c.Servers[serverIndex].Transactions[transaction.ID] = transaction
 	return nil
 }
 

@@ -1,8 +1,13 @@
 package client
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -49,7 +54,7 @@ func (t *Transaction) TimeOut() {
 			if time.Since(t.StartedAt) > time.Millisecond*time.Duration(t.Timeout) {
 				t.Error = ErrTimeOut
 				t.Completed = true
-				log.Printf("Transaction %s - %s timed out",t.Client.ID, t.RequestHeader.MessageType)
+				log.Printf("Transaction %s - %s timed out", t.Client.ID, t.RequestHeader.MessageType)
 				return
 			}
 		} else {
@@ -69,6 +74,12 @@ func (t *Transaction) Process() {
 			t.handleHello()
 		case srmcp.HandShake:
 			t.HandleHandShake()
+		case srmcp.DataLinkReq:
+			t.HandleDataLinkRep()
+		default:
+			t.Error = errors.New("unknown message type")
+			t.Completed = true
+			log.Printf("Unknown message type")
 		}
 	}
 }
@@ -125,4 +136,55 @@ func (t *Transaction) HandleHandShake() {
 		log.Printf("Received HSH message from server %s, encryption key: %x", t.Client.Servers[t.ServerIndex].ID, sharedSecrete)
 		return
 	}
+}
+
+func (t *Transaction) HandleDataLinkRep() {
+	for {
+		if t.Completed {
+			return
+		}
+
+		if len(t.ResponseHeader) == 0 {
+			continue
+		}
+
+		if len(t.ResponseBody) == 0 {
+			continue
+		}
+
+		dataportBytes, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, t.ResponseBody[0])
+		if err != nil {
+			t.Error = err
+			t.Completed = true
+			log.Printf("Failed to decrypt data link response from server %s", t.Client.Servers[t.ServerIndex].ID)
+		}
+		dataport := binary.BigEndian.Uint32(dataportBytes)
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: t.Client.Cert.Raw})
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(t.Client.PrivateKey)})
+		cert, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			t.Error = err
+			t.Completed = true
+			log.Printf("Failed to load client certificate and key")
+		}
+		config := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			RootCAs:      x509.NewCertPool(),
+		}
+		config.RootCAs.AddCert(t.Client.CACert)
+		serverDataLinkAddr := fmt.Sprintf("%s:%d", t.Client.Servers[t.ServerIndex].Address, dataport)
+		conn, err := tls.Dial("tcp", serverDataLinkAddr, config)
+		if err != nil {
+			t.Error = err
+			t.Completed = true
+			log.Printf("Failed to connect to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
+		}
+		t.Client.Servers[t.ServerIndex].mu.Lock()
+		t.Client.Servers[t.ServerIndex].DataConn[dataport] = conn
+		t.Client.Servers[t.ServerIndex].mu.Unlock()
+		t.Completed = true
+		log.Printf("Connected to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
+		return
+	}
+
 }

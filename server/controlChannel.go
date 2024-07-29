@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"time"
 
@@ -125,8 +126,8 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 				s.HandleHello(clientIndex, header)
 			case srmcp.HandShake:
 				s.HandleHandShake(clientIndex, header, body)
-			// case srmcp.DataLinkReq:
-			// 	s.HandleDateLinkReq(header, clientIndex)
+			case srmcp.DataLinkReq:
+				s.HandleDateLinkReq(header, clientIndex)
 			default:
 				log.Printf("Received unknown message type from client %s", header.SenderID)
 			}
@@ -224,6 +225,43 @@ func (s *Server) HandleHandShake(clientIndex string, header *messages.Header, bo
 	_, err = s.Clients[clientIndex].ControlConn.Write(bytes)
 	if err != nil {
 		log.Printf("Failed to send Handshake response message to client %s: %v", header.SenderID, err)
+	}
+
+}
+
+func (s *Server) HandleDateLinkReq(header *messages.Header, clientIndex string) {
+	log.Printf("Received DLR message from client %s", header.SenderID)
+	dataport := s.AvaliableDataPort[rand.Intn(len(s.AvaliableDataPort))]
+	s.StartDataConn(clientIndex, dataport, 5)
+
+	// Send the response
+	respheader := messages.Header{
+		MessageType: srmcp.DataLinkRep,
+		SenderID:    s.ID,
+		Timestamp:   time.Now(),
+		TransactionID: header.TransactionID,
+	}
+	respheaderBytes, err := json.Marshal(respheader)
+	if err != nil {
+		log.Printf("Failed to serialize DataLinkRep message header: %v", err)
+	}
+
+	bodyBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(bodyBytes, dataport)
+	encryptedBodyBytes, err := srmcp.Encrypt(s.Clients[clientIndex].SharedSecret, bodyBytes)
+	if err != nil {
+		log.Printf("Failed to encrypt DataLinkRep message body: %v", err)
+	}
+	responsePreHeader := messages.PreHeader{
+		HeaderLength: uint32(len(respheaderBytes)),
+		BodyLength:   uint32(len(encryptedBodyBytes)),
+	}
+	preHeaderBytes := responsePreHeader.Serialize()
+	bytes := append(preHeaderBytes, respheaderBytes...)
+	bytes = append(bytes, encryptedBodyBytes...)
+	_, err = s.Clients[clientIndex].ControlConn.Write(bytes)
+	if err != nil {
+		log.Printf("Failed to send DataLinkRep message to client %s: %v", header.SenderID, err)
 	}
 
 }
