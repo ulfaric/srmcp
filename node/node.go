@@ -8,9 +8,8 @@ import (
 type NodeInfo struct {
 	ID       string `validate:"required"`
 	Name     string `validate:"required"`
-	Length   uint32 `validate:"required"`
-	Type	 string `validate:"required"`
-	Desc     string 
+	Type     string `validate:"required"`
+	Desc     string
 	Parent   map[string]*NodeInfo
 	Children map[string]*NodeInfo
 }
@@ -18,7 +17,6 @@ type NodeInfo struct {
 type Node struct {
 	ID       string
 	Name     string
-	Length   uint32
 	Value    interface{}
 	Desc     string
 	Parent   map[string]*Node
@@ -103,29 +101,70 @@ func (n *Node) GetParents() map[string]*Node {
 	return n.Parent
 }
 
-// GetNodeInfo returns the node information of the current node.
-func GetNodeInfo(node *Node) *NodeInfo {
-	node.mu.Lock()
-	defer node.mu.Unlock()
+// getNodeInfoRecursive is a helper function for GetNodeInfo to prevent infinite loops.
+func getNodeInfoRecursive(node *Node, visited map[string]bool) *NodeInfo {
+	if visited[node.ID] {
+		return nil
+	}
+
+	visited[node.ID] = true
 
 	// Convert Parent and Children maps to NodeInfo maps recursively
 	parentInfo := make(map[string]*NodeInfo)
 	for k, v := range node.Parent {
-		parentInfo[k] = GetNodeInfo(v)
+		if !visited[k] {
+			parentInfo[k] = getNodeInfoRecursive(v, visited)
+		}
 	}
 
 	childrenInfo := make(map[string]*NodeInfo)
 	for k, v := range node.Children {
-		childrenInfo[k] = GetNodeInfo(v)
+		if !visited[k] {
+			childrenInfo[k] = getNodeInfoRecursive(v, visited)
+		}
 	}
 
 	return &NodeInfo{
 		ID:       node.ID,
 		Name:     node.Name,
-		Length:   node.Length,
 		Type:     reflect.TypeOf(node.Value).String(),
 		Desc:     node.Desc,
 		Parent:   parentInfo,
 		Children: childrenInfo,
 	}
+}
+
+// GetNodeInfo returns the node information of the current node.
+func GetNodeInfo(node *Node) *NodeInfo {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	visited := make(map[string]bool)
+	return getNodeInfoRecursive(node, visited)
+}
+
+// ReconstructNode reconstructs a Node object from a given NodeInfo.
+func ReconstructNode(info *NodeInfo) *Node {
+	if info == nil {
+		return nil
+	}
+
+	node := &Node{
+		ID:       info.ID,
+		Name:     info.Name,
+		Value:    reflect.New(reflect.TypeOf(info.Type)).Elem().Interface(), // Reconstruct value from type
+		Desc:     info.Desc,
+		Parent:   make(map[string]*Node),
+		Children: make(map[string]*Node),
+	}
+
+	// Convert Parent and Children maps from NodeInfo to Node maps recursively
+	for k, v := range info.Parent {
+		node.Parent[k] = ReconstructNode(v)
+	}
+	for k, v := range info.Children {
+		node.Children[k] = ReconstructNode(v)
+	}
+
+	return node
 }

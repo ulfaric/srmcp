@@ -26,8 +26,9 @@ type Transaction struct {
 	Completed      bool
 	RequestHeader  *messages.Header
 	RequestBody    []byte
-	ResponseHeader []*messages.Header
-	ResponseBody   [][]byte
+	MessageIndex   float32
+	ResponseHeader *messages.Header
+	ResponseBody   map[float32][]byte
 	Timeout        int
 	Error          error
 }
@@ -38,8 +39,11 @@ func NewTransaction(client *Client, serverIndex string, requestHeader *messages.
 		Client:        client,
 		ServerIndex:   serverIndex,
 		StartedAt:     time.Now(),
+		Completed:     false,
 		RequestHeader: requestHeader,
 		RequestBody:   requestBody,
+		MessageIndex:  0.0,
+		ResponseBody:  make(map[float32][]byte),
 		Timeout:       timeout,
 	}
 	go t.TimeOut()
@@ -47,13 +51,23 @@ func NewTransaction(client *Client, serverIndex string, requestHeader *messages.
 	return &t
 }
 
+// isCompleted checks if the transaction has completed.
+func (t *Transaction) isCompleted() bool {
+	return t.Completed
+}
+
+// setCompleted sets the error and completes the transaction.
+func (t *Transaction) setCompleted(err error) {
+	t.Error = err
+	t.Completed = true
+}
+
 // TimeOut checks if the transaction has timed out and sets the error if it has.
 func (t *Transaction) TimeOut() {
 	for {
-		if !t.Completed {
+		if !t.isCompleted() {
 			if time.Since(t.StartedAt) > time.Millisecond*time.Duration(t.Timeout) {
-				t.Error = ErrTimeOut
-				t.Completed = true
+				t.setCompleted(ErrTimeOut)
 				log.Printf("Transaction %s - %s timed out", t.Client.ID, t.RequestHeader.MessageType)
 				return
 			}
@@ -66,9 +80,14 @@ func (t *Transaction) TimeOut() {
 // Process processes the transaction based on the message type.
 func (t *Transaction) Process() {
 	for {
-		if t.Completed {
+		if t.isCompleted() {
 			return
 		}
+
+		if t.MessageIndex < 1.0 {
+			continue
+		}
+
 		switch t.RequestHeader.MessageType {
 		case srmcp.HandShake:
 			t.HandleHandShake()
@@ -77,8 +96,7 @@ func (t *Transaction) Process() {
 		case srmcp.Discovery:
 			t.HandleDiscovery()
 		default:
-			t.Error = errors.New("unknown message type")
-			t.Completed = true
+			t.setCompleted(errors.New("unknown message type"))
 			log.Printf("Unknown message type")
 		}
 	}
@@ -87,60 +105,42 @@ func (t *Transaction) Process() {
 // HandleHandShake handles a HSH message from a server.
 func (t *Transaction) HandleHandShake() {
 	for {
-		if t.Completed {
+		if t.isCompleted() {
 			return
 		}
 
-		if len(t.ResponseHeader) == 0 {
-			continue
-		}
-
-		if len(t.ResponseBody) == 0 {
-			continue
-		}
-
 		t.Client.Servers[t.ServerIndex].mu.Lock()
-		t.Client.Servers[t.ServerIndex].ID = t.ResponseHeader[0].SenderID
+		t.Client.Servers[t.ServerIndex].ID = t.ResponseHeader.SenderID
 		t.Client.Servers[t.ServerIndex].mu.Unlock()
 
 		var handshakeMessage messages.HandShakeResponse
-		err := json.Unmarshal(t.ResponseBody[0], &handshakeMessage)
+		err := json.Unmarshal(t.ResponseBody[1.0], &handshakeMessage)
 		if err != nil {
-			t.Error = err
-			t.Completed = true
+			t.setCompleted(err)
+			return
+		} else {
+			sharedSecrete := make([]byte, kyber1024.SharedKeySize)
+			t.Client.Servers[t.ServerIndex].PrivateKey.DecapsulateTo(sharedSecrete, handshakeMessage.CipherText)
+			t.Client.Servers[t.ServerIndex].mu.Lock()
+			t.Client.Servers[t.ServerIndex].SharedSecret = sharedSecrete
+			t.Client.Servers[t.ServerIndex].mu.Unlock()
+			t.setCompleted(nil)
+			log.Printf("Received HSH message from server %s, encryption key: %x", t.Client.Servers[t.ServerIndex].ID, sharedSecrete)
 			return
 		}
-		sharedSecrete := make([]byte, kyber1024.SharedKeySize)
-		t.Client.Servers[t.ServerIndex].PrivateKey.DecapsulateTo(sharedSecrete, handshakeMessage.CipherText)
-		t.Client.Servers[t.ServerIndex].mu.Lock()
-		t.Client.Servers[t.ServerIndex].SharedSecret = sharedSecrete
-		t.Client.Servers[t.ServerIndex].mu.Unlock()
-		t.Completed = true
-		log.Printf("Received HSH message from server %s, encryption key: %x", t.Client.Servers[t.ServerIndex].ID, sharedSecrete)
-		return
 	}
 }
 
 // HandleDataLinkRep handles a DLR message from a server.
 func (t *Transaction) HandleDataLinkRep() {
 	for {
-		if t.Completed {
+		if t.isCompleted() {
 			return
 		}
-
-		if len(t.ResponseHeader) == 0 {
-			continue
-		}
-
-		if len(t.ResponseBody) == 0 {
-			continue
-		}
-
-		dataportBytes, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, t.ResponseBody[0])
+		dataportBytes, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, t.ResponseBody[1.0])
 		if err != nil {
-			t.Error = err
-			t.Completed = true
-			log.Printf("Failed to decrypt data link response from server %s", t.Client.Servers[t.ServerIndex].ID)
+			t.setCompleted(err)
+			log.Printf("Failed to decrypt data link response from server %s, %s", t.Client.Servers[t.ServerIndex].ID, err)
 			return
 		}
 		dataport := binary.BigEndian.Uint32(dataportBytes)
@@ -148,8 +148,7 @@ func (t *Transaction) HandleDataLinkRep() {
 		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(t.Client.PrivateKey)})
 		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		if err != nil {
-			t.Error = err
-			t.Completed = true
+			t.setCompleted(err)
 			log.Printf("Failed to load client certificate and key")
 		}
 		config := &tls.Config{
@@ -160,45 +159,38 @@ func (t *Transaction) HandleDataLinkRep() {
 		serverDataLinkAddr := fmt.Sprintf("%s:%d", t.Client.Servers[t.ServerIndex].Address, dataport)
 		conn, err := tls.Dial("tcp", serverDataLinkAddr, config)
 		if err != nil {
-			t.Error = err
-			t.Completed = true
+			t.setCompleted(err)
 			log.Printf("Failed to connect to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
 			return
+		} else {
+			t.Client.Servers[t.ServerIndex].mu.Lock()
+			t.Client.Servers[t.ServerIndex].DataConn = append(t.Client.Servers[t.ServerIndex].DataConn, conn)
+			t.Client.Servers[t.ServerIndex].mu.Unlock()
+			t.setCompleted(nil)
+			log.Printf("Connected to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
+			go t.Client.HandleDataConn(conn, t.ServerIndex)
+			return
 		}
-		t.Client.Servers[t.ServerIndex].mu.Lock()
-		t.Client.Servers[t.ServerIndex].DataConn = append(t.Client.Servers[t.ServerIndex].DataConn, conn)
-		t.Client.Servers[t.ServerIndex].mu.Unlock()
-		t.Completed = true
-		log.Printf("Connected to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
-		go t.Client.HandleDataConn(conn, t.ServerIndex)
-		return
 	}
 
 }
 
-func (t *Transaction) HandleDiscovery(){
+func (t *Transaction) HandleDiscovery() {
 	for {
-		if t.Completed {
+		if t.isCompleted() {
 			return
 		}
 
-		if len(t.ResponseHeader) == 0 {
-			continue
-		}
-
-		if len(t.ResponseBody) == 0 {
-			continue
-		}
-
-		decryptedBody, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, t.ResponseBody[0])
+		decryptedBody, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, t.ResponseBody[1.0])
 		if err != nil {
-			t.Error = err
-			t.Completed = true
+			t.setCompleted(err)
 			log.Printf("Failed to decrypt discovery response from server %s", t.Client.Servers[t.ServerIndex].ID)
 			return
+		} else {
+			log.Printf("Received discovery response from server %s", t.Client.Servers[t.ServerIndex].ID)
+			t.setCompleted(nil)
+			go t.Client.InitializeNodes(t.ServerIndex, decryptedBody)
+			return
 		}
-		log.Printf("Received discovery response from server %s: %s", t.Client.Servers[t.ServerIndex].ID, decryptedBody)
-		t.Completed = true
-		return
 	}
 }

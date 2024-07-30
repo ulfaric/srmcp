@@ -99,9 +99,10 @@ func (s *Server) Stop() {
 }
 
 // AddNode adds a new node to the server's node list.
-func (s *Server) AddNode(name string, value interface{}) {
+func (s *Server) AddNode(name string, value interface{}) *node.Node {
 	id := uuid.New().String()
 	s.Nodes[id] = node.NewNode(id, name, value)
+	return s.Nodes[id]
 }
 
 // RemoveNode removes a node from the server's node list.

@@ -164,7 +164,9 @@ func (s *Server) HandleDiscovery(clientIndex string, header *messages.Header) {
 		MessageType:   srmcp.Discovery,
 		SenderID:      s.ID,
 		Timestamp:     time.Now(),
-		TransactionID: header.TransactionID}
+		TransactionID: header.TransactionID,
+		Index:         1.0,
+	}
 	responseHeaderBytes, err := json.Marshal(responseHeader)
 	if err != nil {
 		log.Printf("Failed to marshal response header: %v", err)
@@ -191,5 +193,9 @@ func (s *Server) HandleDiscovery(clientIndex string, header *messages.Header) {
 		log.Printf("Failed to send discovery response to client %s: %v", s.Clients[clientIndex].ID, err)
 		return
 	}
-	log.Printf("Sent discovery response to client %s: %x", s.Clients[clientIndex].ID, bytes)
+	log.Printf("Sent discovery response to client %s", s.Clients[clientIndex].ID)
+}
+
+func (s *Server) HandleRead(clientIndex string, header *messages.Header) {
+
 }

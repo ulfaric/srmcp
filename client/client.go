@@ -4,6 +4,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -18,7 +19,7 @@ import (
 type ConnectedServer struct {
 	ID           string
 	Address      string
-	Port         uint32
+	Port         int
 	ControlConn  *tls.Conn
 	DataConn     []*tls.Conn
 	PublicKey    *kyber1024.PublicKey
@@ -67,7 +68,7 @@ func NewClient(certFile, keyFile, caCertFile string) (*Client, error) {
 }
 
 // Connect connects the client to the server at the given address.
-func (c *Client) Connect(addr string, port uint32) error {
+func (c *Client) Connect(addr string, port, timeout int) error {
 	// Create a new TLS connection to the server.
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Cert.Raw})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(c.PrivateKey)})
@@ -104,7 +105,7 @@ func (c *Client) Connect(addr string, port uint32) error {
 	// Start listening for control messages from the server.
 	go c.HandleControlConn(conn)
 	// Send a Handshake message to the server.
-	err = c.HandShake(serverIndex)
+	err = c.HandShake(serverIndex, timeout)
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("failed to send HandShake message to server: %v", err)
@@ -130,4 +131,19 @@ func (c *Client) Close(serverIndex string) error {
 	log.Printf("Disconnected from server %s", c.Servers[serverIndex].ID)
 	delete(c.Servers, serverIndex)
 	return nil
+}
+
+func (c *Client) InitializeNodes(serverIndex string, rawBytes []byte) {
+	var nodeInfos []node.NodeInfo
+	err := json.Unmarshal(rawBytes, &nodeInfos)
+	if err != nil {
+		log.Fatalf("failed to unmarshal node info: %v", err)
+	}
+	for _, nodeInfo := range nodeInfos {
+		n := node.ReconstructNode(&nodeInfo)
+		c.mu.Lock()
+		c.Servers[serverIndex].Nodes[n.ID] = n
+		c.mu.Unlock()
+		log.Printf("Discovered node %s on server %s: %d", n.ID, c.Servers[serverIndex].ID, c.Servers[serverIndex].Nodes[n.ID].Value)
+	}
 }

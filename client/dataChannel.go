@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ulfaric/srmcp"
 	"github.com/ulfaric/srmcp/messages"
+	"github.com/ulfaric/srmcp/node"
 )
 
 func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) (*messages.Header, []byte, error) {
@@ -58,14 +59,16 @@ func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) (*me
 	return &header, bodyBuffer, nil
 }
 
-func (c *Client) HandleDataConn(conn *tls.Conn, serverIndex string){
+func (c *Client) HandleDataConn(conn *tls.Conn, serverIndex string) {
 	defer conn.Close()
 	for {
 		header, body, err := c.DigestEncryptedMessage(conn, serverIndex)
 		if err == nil {
+			transcation := c.Servers[serverIndex].Transactions[header.TransactionID]
 			c.Servers[serverIndex].mu.Lock()
-			c.Servers[serverIndex].Transactions[header.TransactionID].ResponseHeader = append(c.Servers[serverIndex].Transactions[header.TransactionID].ResponseHeader, header)
-			c.Servers[serverIndex].Transactions[header.TransactionID].ResponseBody = append(c.Servers[serverIndex].Transactions[header.TransactionID].ResponseBody, body)
+			transcation.ResponseHeader = header
+			transcation.ResponseBody[header.Index] = body
+			transcation.MessageIndex = header.Index
 			c.Servers[serverIndex].mu.Unlock()
 
 		} else {
@@ -75,7 +78,8 @@ func (c *Client) HandleDataConn(conn *tls.Conn, serverIndex string){
 
 }
 
-func (c *Client) GetNodes(serverIndex string) error {
+// Discover sends a Discover message to the server with the given index.
+func (c *Client) Discover(serverIndex string, timeout int) error {
 
 	// Prepare the header
 	header := messages.Header{
@@ -113,7 +117,89 @@ func (c *Client) GetNodes(serverIndex string) error {
 	}
 
 	// Create a new transaction
-	transaction := NewTransaction(c, serverIndex, &header, nil, 100)
+	transaction := NewTransaction(c, serverIndex, &header, nil, timeout)
 	c.Servers[serverIndex].Transactions[header.TransactionID] = transaction
 	return nil
+}
+
+func (c *Client) Read(serverIndex string, nodeNames []string, timeout int) ([]*node.Node, error) {
+	// Prepare the header
+	header := messages.Header{
+		MessageType:   srmcp.Read,
+		SenderID:      c.ID,
+		Timestamp:     time.Now(),
+		TransactionID: uuid.New().String(),
+	}
+	// Serialize header
+	headerBytes, err := json.Marshal(header)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Discover message header: %w", err)
+	}
+	// Encrypt the header
+	encryptedHeader, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, headerBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt Discover message header: %w", err)
+	}
+
+	// Prepare the Body
+	validNodes := make([]*node.Node, 0)
+	validNodeIDs := make([]string, 0)
+	validNodeNames := make([]string, 0)
+	foundNodes := 0
+	for _, nodeName := range nodeNames {
+		for _, node := range c.Servers[serverIndex].Nodes {
+			if node.Name == nodeName {
+				validNodeIDs = append(validNodeIDs, node.ID)
+				validNodeNames = append(validNodeNames, node.Name)
+				validNodes = append(validNodes, node)
+				foundNodes++
+			}
+		}
+	}
+	if foundNodes == 0 {
+		return nil, fmt.Errorf("no valid nodes found")
+	}
+	body := messages.Read{
+		NodeIDs:   validNodeIDs,
+		NodeNames: validNodeNames,
+	}
+	// Serialize the body
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Discover message header: %w", err)
+	}
+	// Encrypt the body
+	encryptedBody, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, bodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt Discover message header: %w", err)
+	}
+
+	// Prepare pre-header
+	preHeader := messages.PreHeader{
+		HeaderLength: uint32(len(encryptedHeader)),
+		BodyLength:   uint32(len(encryptedBody)),
+	}
+	preHeaderBytes := preHeader.Serialize()
+
+	// Prepare the bytes
+	bytes := append(preHeaderBytes, encryptedHeader...)
+	bytes = append(bytes, encryptedBody...)
+
+	// Randomly select a data link
+	datalink_index := rand.Intn(len(c.Servers[serverIndex].DataConn))
+	_, err = c.Servers[serverIndex].DataConn[datalink_index].Write(bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send Discover message: %w", err)
+	}
+
+	// Create a new transaction
+	transaction := NewTransaction(c, serverIndex, &header, bodyBytes, timeout)
+	c.Servers[serverIndex].Transactions[header.TransactionID] = transaction
+
+	for {
+		if transaction.isCompleted() {
+			break
+		}
+	}
+	return validNodes, transaction.Error
 }

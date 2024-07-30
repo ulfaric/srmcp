@@ -50,7 +50,9 @@ func TestClientServerConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
-	srv.AddNode("testNode", 0)
+	parentNode := srv.AddNode("parentNode", 0)
+	childNode := srv.AddNode("childNode", 1)
+	parentNode.AddChild(childNode)
 
 	serverAddr := "127.0.0.1:8080"
 	go func() {
@@ -68,18 +70,18 @@ func TestClientServerConnection(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	err = clt.Connect("127.0.0.1", uint32(8080))
+	err = clt.Connect("127.0.0.1", 8080, 100)
 	if err != nil {
 		t.Fatalf("Client failed to connect to server: %v", err)
 	}
 	time.Sleep(1 * time.Second)
 
 	// Request a data link
-	clt.RequestDataLink(serverAddr)
+	clt.RequestDataLink(serverAddr, 100)
 	time.Sleep(1 * time.Second)
 
 	// Send a discovery message
-	clt.GetNodes(serverAddr)
+	clt.Discover(serverAddr, 100)
 	time.Sleep(1 * time.Second)
 
 	// Clean up
