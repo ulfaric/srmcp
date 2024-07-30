@@ -50,7 +50,7 @@ func TestClientServerConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
-	parentNode := srv.AddNode("parentNode", 0)
+	parentNode := srv.AddNode("parentNode", "0asdaw")
 	childNode := srv.AddNode("childNode", 1)
 	parentNode.AddChild(childNode)
 
@@ -82,6 +82,11 @@ func TestClientServerConnection(t *testing.T) {
 
 	// Send a discovery message
 	clt.Discover(serverAddr, 100)
+	time.Sleep(1 * time.Second)
+
+	// Send a read message
+	nodes := []string{"parentNode", "childNode"}
+	clt.Read(serverAddr, nodes, 1000)
 	time.Sleep(1 * time.Second)
 
 	// Clean up

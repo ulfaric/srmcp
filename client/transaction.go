@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/cloudflare/circl/kem/kyber/kyber1024"
@@ -26,9 +27,9 @@ type Transaction struct {
 	Completed      bool
 	RequestHeader  *messages.Header
 	RequestBody    []byte
-	MessageIndex   float32
+	MessageIndex   float64
 	ResponseHeader *messages.Header
-	ResponseBody   map[float32][]byte
+	ResponseBody   map[float64][]byte
 	Timeout        int
 	Error          error
 }
@@ -43,7 +44,7 @@ func NewTransaction(client *Client, serverIndex string, requestHeader *messages.
 		RequestHeader: requestHeader,
 		RequestBody:   requestBody,
 		MessageIndex:  0.0,
-		ResponseBody:  make(map[float32][]byte),
+		ResponseBody:  make(map[float64][]byte),
 		Timeout:       timeout,
 	}
 	go t.TimeOut()
@@ -95,6 +96,8 @@ func (t *Transaction) Process() {
 			t.HandleDataLinkRep()
 		case srmcp.Discovery:
 			t.HandleDiscovery()
+		case srmcp.Read:
+			t.HandleReadResponse()
 		default:
 			t.setCompleted(errors.New("unknown message type"))
 			log.Printf("Unknown message type")
@@ -190,6 +193,51 @@ func (t *Transaction) HandleDiscovery() {
 			log.Printf("Received discovery response from server %s", t.Client.Servers[t.ServerIndex].ID)
 			t.setCompleted(nil)
 			go t.Client.InitializeNodes(t.ServerIndex, decryptedBody)
+			return
+		}
+	}
+}
+
+func (t *Transaction) HandleReadResponse() {
+	for {
+		if t.isCompleted() {
+			return
+		}
+
+		// Reorder the body
+		var indexes []float64
+		for index := range t.ResponseBody {
+			indexes = append(indexes, index)
+		}
+		sort.Float64s(indexes)
+		var encryptedBody []byte
+		for _, index := range indexes {
+			encryptedBody = append(encryptedBody, t.ResponseBody[index]...)
+		}
+
+		// Decrypt the body
+		decryptedBody, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, encryptedBody)
+		if err != nil {
+			t.setCompleted(err)
+			log.Printf("Failed to decrypt read response from server %s", t.Client.Servers[t.ServerIndex].ID)
+			return
+		} else {
+			// Unmarshal the body
+			var readResponse []messages.ReadResponse
+			err := json.Unmarshal(decryptedBody, &readResponse)
+			if err != nil {
+				t.setCompleted(err)
+				log.Printf("Failed to unmarshal read response from server %s: %s", t.Client.Servers[t.ServerIndex].ID, err)
+				return
+			}
+			// Update the node value
+			for _, node := range readResponse {
+				t.Client.Servers[t.ServerIndex].mu.Lock()
+				t.Client.Servers[t.ServerIndex].Nodes[node.NodeID].Value = node.Value
+				t.Client.Servers[t.ServerIndex].mu.Unlock()
+				log.Printf("Received read response from server %s, node %s value updated to %v", t.Client.Servers[t.ServerIndex].ID, t.Client.Servers[t.ServerIndex].Nodes[node.NodeID].Name, t.Client.Servers[t.ServerIndex].Nodes[node.NodeID].Value)
+			}
+			t.setCompleted(nil)
 			return
 		}
 	}

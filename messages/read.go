@@ -6,7 +6,8 @@ type Read struct {
 }
 
 type ReadResponse struct {
-	NodeID   string `validate:"required"`
-	NodeName string `validate:"required"`
+	NodeID   string      `validate:"required"`
+	NodeName string      `validate:"required"`
+	Type     string      `validate:"required"`
 	Value    interface{} `validate:"required"`
 }

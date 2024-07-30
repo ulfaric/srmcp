@@ -10,5 +10,5 @@ type Header struct {
 	SenderID      string    `validate:"required"`
 	Timestamp     time.Time `validate:"required"`
 	TransactionID string
-	Index         float32
+	Index         float64
 }

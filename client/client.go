@@ -144,6 +144,6 @@ func (c *Client) InitializeNodes(serverIndex string, rawBytes []byte) {
 		c.mu.Lock()
 		c.Servers[serverIndex].Nodes[n.ID] = n
 		c.mu.Unlock()
-		log.Printf("Discovered node %s on server %s: %d", n.ID, c.Servers[serverIndex].ID, c.Servers[serverIndex].Nodes[n.ID].Value)
+		log.Printf("Discovered node %s on server %s", n.ID, c.Servers[serverIndex].ID)
 	}
 }
