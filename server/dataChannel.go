@@ -254,6 +254,63 @@ func (s *Server) HandleRead(clientIndex string, header *messages.Header, body []
 	}
 	log.Printf("Prepared read response for client %s", s.Clients[clientIndex].ID)
 	// Split the read response into chunks
+	chunks := s.Chunking(header, clientIndex, encryptedReadResponse)
+	// Send the read response chunks
+	err = s.SendChunks(chunks, header, clientIndex)
+	if err != nil {
+		log.Printf("Failed to send read response to client %s: %v", s.Clients[clientIndex].ID, err)
+		return
+	}
+
+
+}
+
+func (s *Server) SendChunks(chunks [][]byte, header *messages.Header, clientIndex string) error {
+	for i, chunk := range chunks {
+
+		index := float64((i + 1) / len(chunks))
+		responseHeader := &messages.Header{
+			MessageType:   header.MessageType,
+			SenderID:      s.ID,
+			Timestamp:     time.Now(),
+			TransactionID: header.TransactionID,
+			Index:         index,
+		}
+
+		responseHeaderBytes, err := json.Marshal(responseHeader)
+		if err != nil {
+			log.Printf("Failed to marshal response header: %v", err)
+			return err
+		}
+
+		encryptedResponseHeader, err := srmcp.Encrypt(s.Clients[clientIndex].SharedSecret, responseHeaderBytes)
+		if err != nil {
+			log.Printf("Failed to encrypt response header: %v", err)
+			return err
+		}
+
+		preHeader := messages.PreHeader{
+			HeaderLength: uint32(len(encryptedResponseHeader)),
+			BodyLength:   uint32(len(chunk)),
+		}
+
+		preHeaderBytes := preHeader.Serialize()
+
+		bytes := append(preHeaderBytes, encryptedResponseHeader...)
+		bytes = append(bytes, chunk...)
+
+		dataportIndex := rand.Intn(len(s.Clients[clientIndex].DataConn))
+		_, err = s.Clients[clientIndex].DataConn[dataportIndex].Write(bytes)
+		if err != nil {
+			log.Printf("Failed to send read response to client %s: %v", s.Clients[clientIndex].ID, err)
+			return err
+		}
+		log.Printf("Sent read response chunk %d to client %s", i+1, s.Clients[clientIndex].ID)
+	}
+	return nil
+}
+
+func (s *Server) Chunking(header *messages.Header, clientIndex string, encryptedReadResponse []byte) [][]byte {
 	numChunks := rand.Intn(len(s.Clients[clientIndex].DataConn)) + 1
 	dataLen := len(encryptedReadResponse)
 	chunkSize := int(math.Ceil(float64(dataLen) / float64(numChunks)))
@@ -265,48 +322,6 @@ func (s *Server) HandleRead(clientIndex string, header *messages.Header, body []
 		}
 		chunks = append(chunks, encryptedReadResponse[i:end])
 	}
-	log.Printf("Split read response into %d chunks for client %s", numChunks, s.Clients[clientIndex].ID)
-	// Send the Chunks
-	for i, chunk := range chunks {
-		// Prepare the response header
-		index := float64((i + 1) / len(chunks))
-		responseHeader := &messages.Header{
-			MessageType:   srmcp.Read,
-			SenderID:      s.ID,
-			Timestamp:     time.Now(),
-			TransactionID: header.TransactionID,
-			Index:         index,
-		}
-		// Serialize the response header
-		responseHeaderBytes, err := json.Marshal(responseHeader)
-		if err != nil {
-			log.Printf("Failed to marshal response header: %v", err)
-			return
-		}
-		// Encrypt the response header
-		encryptedResponseHeader, err := srmcp.Encrypt(s.Clients[clientIndex].SharedSecret, responseHeaderBytes)
-		if err != nil {
-			log.Printf("Failed to encrypt response header: %v", err)
-			return
-		}
-		// Prepare the pre-header
-		preHeader := messages.PreHeader{
-			HeaderLength: uint32(len(encryptedResponseHeader)),
-			BodyLength:   uint32(len(chunk)),
-		}
-		// Serialize the pre-header
-		preHeaderBytes := preHeader.Serialize()
-		// Combine the pre-header, response header, and chunk
-		bytes := append(preHeaderBytes, encryptedResponseHeader...)
-		bytes = append(bytes, chunk...)
-		// Send the response
-		dataportIndex := rand.Intn(len(s.Clients[clientIndex].DataConn))
-		_, err = s.Clients[clientIndex].DataConn[dataportIndex].Write(bytes)
-		if err != nil {
-			log.Printf("Failed to send read response to client %s: %v", s.Clients[clientIndex].ID, err)
-			return
-		}
-		log.Printf("Sent read response chunk %d to client %s", i+1, s.Clients[clientIndex].ID)
-	}
-
+	log.Printf("Split %s response into %d chunks for client %s", header.MessageType, numChunks, s.Clients[clientIndex].ID)
+	return chunks
 }

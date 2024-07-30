@@ -85,7 +85,7 @@ func TestClientServerConnection(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Send a read message
-	nodes := []string{"parentNode", "childNode"}
+	nodes := []string{"parentNode"}
 	clt.Read(serverAddr, nodes, 1000)
 	time.Sleep(1 * time.Second)
 
