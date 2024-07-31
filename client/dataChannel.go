@@ -68,9 +68,8 @@ func (c *Client) HandleDataConn(conn *tls.Conn, serverIndex string) {
 			c.Servers[serverIndex].mu.Lock()
 			transcation.ResponseHeader = header
 			transcation.ResponseBody[header.Index] = body
-			transcation.MessageIndex = header.Index
+			transcation.Segment = header.Segment
 			c.Servers[serverIndex].mu.Unlock()
-
 		} else {
 			continue
 		}
@@ -122,6 +121,7 @@ func (c *Client) Discover(serverIndex string, timeout int) error {
 	return nil
 }
 
+// Read sends a Read message to the server with the given index.
 func (c *Client) Read(serverIndex string, nodeNames []string, timeout int) ([]*node.Node, error) {
 	// Prepare the header
 	header := messages.Header{
@@ -202,4 +202,79 @@ func (c *Client) Read(serverIndex string, nodeNames []string, timeout int) ([]*n
 		}
 	}
 	return validNodes, transaction.Error
+}
+
+func (c *Client) Write(serverIndex string, nodeName string, value interface{}, timeout int) error {
+	// Prepare the header
+	header := messages.Header{
+		MessageType:   srmcp.Write,
+		SenderID:      c.ID,
+		Timestamp:     time.Now(),
+		TransactionID: uuid.New().String(),
+	}
+	// Serialize header
+	headerBytes, err := json.Marshal(header)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Discover message header: %w", err)
+	}
+	// Encrypt the header
+	encryptedHeader, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, headerBytes)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt Discover message header: %w", err)
+	}
+
+	// Prepare the Body
+	var validNode *node.Node
+	for _, node := range c.Servers[serverIndex].Nodes {
+		if node.Name == nodeName {
+			validNode = node
+		}
+	}
+	if validNode == nil {
+		return fmt.Errorf("no valid node with %s found", nodeName)
+	}
+	body := messages.Write{
+		NodeID:   validNode.ID,
+		NodeName: validNode.Name,
+		Value:    value,
+	}
+	// Serialize the body
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Discover message header: %w", err)
+	}
+	// Encrypt the body
+	encryptedBody, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, bodyBytes)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt Discover message header: %w", err)
+	}
+
+	// Prepare pre-header
+	preHeader := messages.PreHeader{
+		HeaderLength: uint32(len(encryptedHeader)),
+		BodyLength:   uint32(len(encryptedBody)),
+	}
+	preHeaderBytes := preHeader.Serialize()
+
+	// Prepare the bytes
+	bytes := append(preHeaderBytes, encryptedHeader...)
+	bytes = append(bytes, encryptedBody...)
+
+	// Randomly select a data link
+	datalink_index := rand.Intn(len(c.Servers[serverIndex].DataConn))
+	_, err = c.Servers[serverIndex].DataConn[datalink_index].Write(bytes)
+	if err != nil {
+		return fmt.Errorf("failed to send Discover message: %w", err)
+	}
+
+	// Create a new transaction
+	transaction := NewTransaction(c, serverIndex, &header, bodyBytes, timeout)
+	c.Servers[serverIndex].Transactions[header.TransactionID] = transaction
+
+	for {
+		if transaction.isCompleted() {
+			break
+		}
+	}
+	return transaction.Error
 }

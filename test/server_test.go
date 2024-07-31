@@ -77,8 +77,10 @@ func TestClientServerConnection(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Request a data link
-	clt.RequestDataLink(serverAddr, 100)
-	time.Sleep(1 * time.Second)
+	for i := 0; i < 5; i++ {
+		clt.RequestDataLink(serverAddr, 100)
+		time.Sleep(1 * time.Second)
+	}
 
 	// Send a discovery message
 	clt.Discover(serverAddr, 100)
@@ -86,7 +88,11 @@ func TestClientServerConnection(t *testing.T) {
 
 	// Send a read message
 	nodes := []string{"parentNode"}
-	clt.Read(serverAddr, nodes, 1000)
+	clt.Read(serverAddr, nodes, 100)
+	time.Sleep(1 * time.Second)
+
+	// Send a write message
+	clt.Write(serverAddr, "parentNode", "test.txt", 1000)
 	time.Sleep(1 * time.Second)
 
 	// Clean up

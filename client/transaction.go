@@ -27,9 +27,9 @@ type Transaction struct {
 	Completed      bool
 	RequestHeader  *messages.Header
 	RequestBody    []byte
-	MessageIndex   float64
 	ResponseHeader *messages.Header
 	ResponseBody   map[float64][]byte
+	Segment        int
 	Timeout        int
 	Error          error
 }
@@ -43,9 +43,10 @@ func NewTransaction(client *Client, serverIndex string, requestHeader *messages.
 		Completed:     false,
 		RequestHeader: requestHeader,
 		RequestBody:   requestBody,
-		MessageIndex:  0.0,
 		ResponseBody:  make(map[float64][]byte),
+		Segment:       0,
 		Timeout:       timeout,
+		Error:         nil,
 	}
 	go t.TimeOut()
 	go t.Process()
@@ -85,23 +86,22 @@ func (t *Transaction) Process() {
 			return
 		}
 
-		if t.MessageIndex < 1.0 {
-			continue
+		if t.Segment != 0 && t.Segment == len(t.ResponseBody) {
+			switch t.RequestHeader.MessageType {
+			case srmcp.HandShake:
+				t.HandleHandShake()
+			case srmcp.DataLinkReq:
+				t.HandleDataLinkRep()
+			case srmcp.Discovery:
+				t.HandleDiscovery()
+			case srmcp.Read:
+				t.HandleReadResponse()
+			default:
+				t.setCompleted(errors.New("unknown message type"))
+				log.Printf("Unknown message type")
+			}
 		}
 
-		switch t.RequestHeader.MessageType {
-		case srmcp.HandShake:
-			t.HandleHandShake()
-		case srmcp.DataLinkReq:
-			t.HandleDataLinkRep()
-		case srmcp.Discovery:
-			t.HandleDiscovery()
-		case srmcp.Read:
-			t.HandleReadResponse()
-		default:
-			t.setCompleted(errors.New("unknown message type"))
-			log.Printf("Unknown message type")
-		}
 	}
 }
 
@@ -210,6 +210,7 @@ func (t *Transaction) HandleReadResponse() {
 			indexes = append(indexes, index)
 		}
 		sort.Float64s(indexes)
+		log.Printf("Received read response from server %s, indexes: %v", t.Client.Servers[t.ServerIndex].ID, indexes)
 		var encryptedBody []byte
 		for _, index := range indexes {
 			encryptedBody = append(encryptedBody, t.ResponseBody[index]...)
@@ -219,7 +220,7 @@ func (t *Transaction) HandleReadResponse() {
 		decryptedBody, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, encryptedBody)
 		if err != nil {
 			t.setCompleted(err)
-			log.Printf("Failed to decrypt read response from server %s", t.Client.Servers[t.ServerIndex].ID)
+			log.Printf("Failed to decrypt read response from server %s: %s", t.Client.Servers[t.ServerIndex].ID, err)
 			return
 		} else {
 			// Unmarshal the body

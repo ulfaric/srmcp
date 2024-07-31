@@ -175,6 +175,7 @@ func (s *Server) HandleHandShake(clientIndex string, header *messages.Header, bo
 		Timestamp:     time.Now(),
 		TransactionID: header.TransactionID,
 		Index:         1.0,
+		Segment:       1,
 	}
 	headerBytes, err := json.Marshal(reponseHeader)
 	if err != nil {
@@ -206,6 +207,7 @@ func (s *Server) HandleDateLinkReq(header *messages.Header, clientIndex string) 
 		Timestamp:     time.Now(),
 		TransactionID: header.TransactionID,
 		Index:         1.0,
+		Segment:       1,
 	}
 	respheaderBytes, err := json.Marshal(respheader)
 	if err != nil {

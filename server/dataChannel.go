@@ -12,7 +12,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"reflect"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -110,6 +109,70 @@ func (s *Server) AcceptDataConn(clientIndex string, listener net.Listener, datap
 	log.Printf("Datalink listener on %s accepted connection from client %s and closed", listener.Addr().String(), s.Clients[clientIndex].ID)
 }
 
+// Segmenting splits the response into segments for transmission to the client.
+func (s *Server) Segmenting(header *messages.Header, clientIndex string, encryptedBody []byte) [][]byte {
+	numChunks := rand.Intn(len(s.Clients[clientIndex].DataConn)) + 1
+	dataLen := len(encryptedBody)
+	chunkSize := int(math.Ceil(float64(dataLen) / float64(numChunks)))
+	segments := make([][]byte, 0, numChunks)
+	for i := 0; i < dataLen; i += chunkSize {
+		end := i + chunkSize
+		if end > dataLen {
+			end = dataLen
+		}
+		segments = append(segments, encryptedBody[i:end])
+	}
+	log.Printf("Split %s response into %d chunks for client %s", header.MessageType, numChunks, s.Clients[clientIndex].ID)
+	return segments
+}
+
+// TransmitSegments sends the response segments to the client.
+func (s *Server) TransmitSegments(segments [][]byte, header *messages.Header, clientIndex string) error {
+	for i, chunk := range segments {
+
+		index := float64(i+1) / float64(len(segments))
+		responseHeader := &messages.Header{
+			MessageType:   header.MessageType,
+			SenderID:      s.ID,
+			Timestamp:     time.Now(),
+			TransactionID: header.TransactionID,
+			Index:         index,
+			Segment:       len(segments),
+		}
+
+		responseHeaderBytes, err := json.Marshal(responseHeader)
+		if err != nil {
+			log.Printf("Failed to marshal response header: %v", err)
+			return err
+		}
+
+		encryptedResponseHeader, err := srmcp.Encrypt(s.Clients[clientIndex].SharedSecret, responseHeaderBytes)
+		if err != nil {
+			log.Printf("Failed to encrypt response header: %v", err)
+			return err
+		}
+
+		preHeader := messages.PreHeader{
+			HeaderLength: uint32(len(encryptedResponseHeader)),
+			BodyLength:   uint32(len(chunk)),
+		}
+
+		preHeaderBytes := preHeader.Serialize()
+
+		bytes := append(preHeaderBytes, encryptedResponseHeader...)
+		bytes = append(bytes, chunk...)
+
+		dataportIndex := rand.Intn(len(s.Clients[clientIndex].DataConn))
+		_, err = s.Clients[clientIndex].DataConn[dataportIndex].Write(bytes)
+		if err != nil {
+			log.Printf("Failed to send read response to client %s: %v", s.Clients[clientIndex].ID, err)
+			return err
+		}
+		log.Printf("Sent read response chunk %f to client %s", index, s.Clients[clientIndex].ID)
+	}
+	return nil
+}
+
 // HandleDataConn handles the data connection with the client.
 func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint32) {
 	// TLS Handshake
@@ -141,6 +204,8 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint
 				s.HandleDiscovery(clientIndex, header)
 			case srmcp.Read:
 				s.HandleRead(clientIndex, header, body)
+			case srmcp.Write:
+				s.HandleWrite(clientIndex, header, body)
 			}
 		} else {
 			continue
@@ -148,6 +213,8 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint
 	}
 }
 
+// HandleDiscovery handles the discovery request from the client.
+// It sends the node information to the client and client reconstructs the nodes on its side.
 func (s *Server) HandleDiscovery(clientIndex string, header *messages.Header) {
 	nodesInfo := make([]*node.NodeInfo, 0)
 	for nodeID := range s.Nodes {
@@ -170,6 +237,7 @@ func (s *Server) HandleDiscovery(clientIndex string, header *messages.Header) {
 		Timestamp:     time.Now(),
 		TransactionID: header.TransactionID,
 		Index:         1.0,
+		Segment:       1,
 	}
 	responseHeaderBytes, err := json.Marshal(responseHeader)
 	if err != nil {
@@ -200,6 +268,7 @@ func (s *Server) HandleDiscovery(clientIndex string, header *messages.Header) {
 	log.Printf("Sent discovery response to client %s", s.Clients[clientIndex].ID)
 }
 
+// HandleRead handles the read request from the client.
 func (s *Server) HandleRead(clientIndex string, header *messages.Header, body []byte) {
 	// Decrypt the body
 	decryptedBody, err := srmcp.Decrypt(s.Clients[clientIndex].SharedSecret, body)
@@ -236,7 +305,6 @@ func (s *Server) HandleRead(clientIndex string, header *messages.Header, body []
 		readResponse = append(readResponse, &messages.ReadResponse{
 			NodeID:   nodeID,
 			NodeName: node.Name,
-			Type:     reflect.TypeOf(node.Value).String(),
 			Value:    node.Value,
 		})
 	}
@@ -253,75 +321,103 @@ func (s *Server) HandleRead(clientIndex string, header *messages.Header, body []
 		return
 	}
 	log.Printf("Prepared read response for client %s", s.Clients[clientIndex].ID)
-	// Split the read response into chunks
-	chunks := s.Chunking(header, clientIndex, encryptedReadResponse)
+	// Split the read response into segments
+	segments := s.Segmenting(header, clientIndex, encryptedReadResponse)
 	// Send the read response chunks
-	err = s.SendChunks(chunks, header, clientIndex)
+	err = s.TransmitSegments(segments, header, clientIndex)
 	if err != nil {
 		log.Printf("Failed to send read response to client %s: %v", s.Clients[clientIndex].ID, err)
 		return
 	}
-
-
 }
 
-func (s *Server) SendChunks(chunks [][]byte, header *messages.Header, clientIndex string) error {
-	for i, chunk := range chunks {
-
-		index := float64((i + 1) / len(chunks))
-		responseHeader := &messages.Header{
-			MessageType:   header.MessageType,
-			SenderID:      s.ID,
-			Timestamp:     time.Now(),
-			TransactionID: header.TransactionID,
-			Index:         index,
-		}
-
-		responseHeaderBytes, err := json.Marshal(responseHeader)
-		if err != nil {
-			log.Printf("Failed to marshal response header: %v", err)
-			return err
-		}
-
-		encryptedResponseHeader, err := srmcp.Encrypt(s.Clients[clientIndex].SharedSecret, responseHeaderBytes)
-		if err != nil {
-			log.Printf("Failed to encrypt response header: %v", err)
-			return err
-		}
-
-		preHeader := messages.PreHeader{
-			HeaderLength: uint32(len(encryptedResponseHeader)),
-			BodyLength:   uint32(len(chunk)),
-		}
-
-		preHeaderBytes := preHeader.Serialize()
-
-		bytes := append(preHeaderBytes, encryptedResponseHeader...)
-		bytes = append(bytes, chunk...)
-
-		dataportIndex := rand.Intn(len(s.Clients[clientIndex].DataConn))
-		_, err = s.Clients[clientIndex].DataConn[dataportIndex].Write(bytes)
-		if err != nil {
-			log.Printf("Failed to send read response to client %s: %v", s.Clients[clientIndex].ID, err)
-			return err
-		}
-		log.Printf("Sent read response chunk %d to client %s", i+1, s.Clients[clientIndex].ID)
+// HandleWrite handles the write request from the client.
+func (s *Server) HandleWrite(clientIndex string, header *messages.Header, body []byte) {
+	// Decrypt the body
+	decryptedBody, err := srmcp.Decrypt(s.Clients[clientIndex].SharedSecret, body)
+	if err != nil {
+		log.Printf("Failed to decrypt write request from client %s: %v", s.Clients[clientIndex].ID, err)
+		return
 	}
-	return nil
-}
-
-func (s *Server) Chunking(header *messages.Header, clientIndex string, encryptedReadResponse []byte) [][]byte {
-	numChunks := rand.Intn(len(s.Clients[clientIndex].DataConn)) + 1
-	dataLen := len(encryptedReadResponse)
-	chunkSize := int(math.Ceil(float64(dataLen) / float64(numChunks)))
-	chunks := make([][]byte, 0, numChunks)
-	for i := 0; i < dataLen; i += chunkSize {
-		end := i + chunkSize
-		if end > dataLen {
-			end = dataLen
-		}
-		chunks = append(chunks, encryptedReadResponse[i:end])
+	// Deserialize the write request
+	var writeRequest messages.Write
+	if err := json.Unmarshal(decryptedBody, &writeRequest); err != nil {
+		log.Printf("Failed to unmarshal write request from client %s: %v", s.Clients[clientIndex].ID, err)
+		return
 	}
-	log.Printf("Split %s response into %d chunks for client %s", header.MessageType, numChunks, s.Clients[clientIndex].ID)
-	return chunks
+	// Validate the write request
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := validate.Struct(writeRequest); err != nil {
+		log.Printf("Invalid write request from client %s: %v", s.Clients[clientIndex].ID, err)
+		return
+	}
+	log.Printf("Received write request from client %s", s.Clients[clientIndex].ID)
+	node, ok := s.Nodes[writeRequest.NodeID]
+	if !ok {
+		log.Printf("Node %s not found", writeRequest.NodeID)
+		return
+	}
+	if node.Name != writeRequest.NodeName {
+		log.Printf("Node %s name mismatch", writeRequest.NodeID)
+		return
+	}
+	node.Value = writeRequest.Value
+	log.Printf("Updated node %s value to %v", writeRequest.NodeID, writeRequest.Value)
+
+	// Prepare the response header
+	responseHeader := &messages.Header{
+		MessageType:   srmcp.Write,
+		SenderID:      s.ID,
+		Timestamp:     time.Now(),
+		TransactionID: header.TransactionID,
+		Index:         1.0,
+		Segment:       1,
+	}
+	responseHeaderBytes, err := json.Marshal(responseHeader)
+	if err != nil {
+		log.Printf("Failed to marshal response header: %v", err)
+		return
+	}
+	encryptedResponseHeader, err := srmcp.Encrypt(s.Clients[clientIndex].SharedSecret, responseHeaderBytes)
+	if err != nil {
+		log.Printf("Failed to encrypt response header: %v", err)
+		return
+	}
+
+	// Prepare the response body
+	writeResponse := &messages.WriteResponse{
+		NodeID:   node.ID,
+		NodeName: node.Name,
+		Value:    node.Value,
+	}
+	writeResponseBytes, err := json.Marshal(writeResponse)
+	if err != nil {
+		log.Printf("Failed to marshal write response: %v", err)
+		return
+	}
+	encryptedWriteResponse, err := srmcp.Encrypt(s.Clients[clientIndex].SharedSecret, writeResponseBytes)
+	if err != nil {
+		log.Printf("Failed to encrypt write response: %v", err)
+		return
+	}
+
+	// Prepare the pre-header
+	responsePreHeader := messages.PreHeader{
+		HeaderLength: uint32(len(encryptedResponseHeader)),
+		BodyLength:   uint32(len(encryptedWriteResponse)),
+	}
+	responsePreHeaderBytes := responsePreHeader.Serialize()
+
+	// Prepare the bytes
+	bytes := append(responsePreHeaderBytes, encryptedResponseHeader...)
+	bytes = append(bytes, encryptedWriteResponse...)
+
+	// Send the response
+	dataportIndex := rand.Intn(len(s.Clients[clientIndex].DataConn))
+	_, err = s.Clients[clientIndex].DataConn[dataportIndex].Write(bytes)
+	if err != nil {
+		log.Printf("Failed to send write response to client %s: %v", s.Clients[clientIndex].ID, err)
+		return
+	}
+	log.Printf("Sent write response to client %s", s.Clients[clientIndex].ID)
 }

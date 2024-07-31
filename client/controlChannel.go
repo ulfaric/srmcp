@@ -65,7 +65,7 @@ func (c *Client) HandleControlConn(conn *tls.Conn) {
 			c.Servers[serverIndex].mu.Lock()
 			transaction.ResponseHeader = header
 			transaction.ResponseBody[header.Index] = body
-			transaction.MessageIndex = header.Index
+			transaction.Segment = header.Segment
 			c.Servers[serverIndex].mu.Unlock()
 		} else {
 			continue
