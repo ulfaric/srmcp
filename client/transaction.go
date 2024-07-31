@@ -96,6 +96,8 @@ func (t *Transaction) Process() {
 				t.HandleDiscovery()
 			case srmcp.Read:
 				t.HandleReadResponse()
+			case srmcp.Write:
+				t.handleWriteResponse()
 			default:
 				t.setCompleted(errors.New("unknown message type"))
 				log.Printf("Unknown message type")
@@ -239,6 +241,49 @@ func (t *Transaction) HandleReadResponse() {
 				log.Printf("Received read response from server %s, node %s value updated to %v", t.Client.Servers[t.ServerIndex].ID, t.Client.Servers[t.ServerIndex].Nodes[node.NodeID].Name, t.Client.Servers[t.ServerIndex].Nodes[node.NodeID].Value)
 			}
 			t.setCompleted(nil)
+			return
+		}
+	}
+}
+
+func (t *Transaction) handleWriteResponse() {
+	for {
+		if t.isCompleted() {
+			return
+		}
+
+		// Reorder the body
+		var indexes []float64
+		for index := range t.ResponseBody {
+			indexes = append(indexes, index)
+		}
+		sort.Float64s(indexes)
+		log.Printf("Received write response from server %s, indexes: %v", t.Client.Servers[t.ServerIndex].ID, indexes)
+		var encryptedBody []byte
+		for _, index := range indexes {
+			encryptedBody = append(encryptedBody, t.ResponseBody[index]...)
+		}
+
+		// Decrypt the body
+		decryptedBody, err := srmcp.Decrypt(t.Client.Servers[t.ServerIndex].SharedSecret, encryptedBody)
+		if err != nil {
+			t.setCompleted(err)
+			log.Printf("Failed to decrypt write response from server %s: %s", t.Client.Servers[t.ServerIndex].ID, err)
+			return
+		} else {
+			// Unmarshal the body
+			var writeResponse messages.WriteResponse
+			err := json.Unmarshal(decryptedBody, &writeResponse)
+			if err != nil {
+				t.setCompleted(err)
+				log.Printf("Failed to unmarshal write response from server %s: %s", t.Client.Servers[t.ServerIndex].ID, err)
+				return
+			}
+			if writeResponse.Value != t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Value {
+				t.setCompleted(errors.New("write response value does not match"))
+				log.Printf("Write response value does not match, expected %v, got %v", t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Value, writeResponse.Value)
+			}
+			log.Printf(("Write operation successful on server %s, node %s value updated to %v"), t.Client.Servers[t.ServerIndex].ID, t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Name, writeResponse.Value)
 			return
 		}
 	}
