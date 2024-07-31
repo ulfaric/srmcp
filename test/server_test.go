@@ -92,7 +92,7 @@ func TestClientServerConnection(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Send a write message
-	clt.Write(serverAddr, "parentNode", "test.txt", 1000)
+	clt.Write(serverAddr, "parentNode", "test.txt", 100)
 	time.Sleep(1 * time.Second)
 
 	// Clean up
