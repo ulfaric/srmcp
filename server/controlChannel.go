@@ -82,21 +82,7 @@ func (s *Server) StartControlConn() error {
 	}
 	s.ControlListener = listener
 	log.Printf("Server Control channel listening on %s", addr)
-
-	go s.AcceptControlConn()
 	return nil
-}
-
-// AcceptControlConn accepts incoming control connections from clients.
-func (s *Server) AcceptControlConn() {
-	for {
-		conn, err := s.ControlListener.Accept()
-		if err != nil {
-			continue
-		} else {
-			go s.HandleControlConn(conn)
-		}
-	}
 }
 
 // HandleControlConn handles the control connection with the client.

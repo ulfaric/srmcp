@@ -82,7 +82,14 @@ func (s *Server) Run() error {
 	if err != nil {
 		return err
 	}
-	return nil
+	for {
+		conn, err := s.ControlListener.Accept()
+		if err != nil {
+			continue
+		} else {
+			go s.HandleControlConn(conn)
+		}
+	}
 }
 
 // Stop gracefully shuts down the server by cancelling the context, closing the control listener, and waiting for all connections to finish.
