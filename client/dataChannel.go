@@ -118,7 +118,12 @@ func (c *Client) Discover(serverIndex string, timeout int) error {
 	// Create a new transaction
 	transaction := NewTransaction(c, serverIndex, &header, nil, timeout)
 	c.Servers[serverIndex].Transactions[header.TransactionID] = transaction
-	return nil
+	for {
+		if transaction.isCompleted() {
+			break
+		}
+	}
+	return transaction.Error
 }
 
 // Read sends a Read message to the server with the given index.

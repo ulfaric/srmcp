@@ -126,7 +126,12 @@ func (c *Client) HandShake(serverIndex string, timeout int) error {
 	// Create a new transaction
 	transaction := NewTransaction(c, serverIndex, &header, bodyBytes, timeout)
 	c.Servers[serverIndex].Transactions[transaction.ID] = transaction
-	return nil
+	for {
+		if transaction.isCompleted() {
+			break
+		}
+	}
+	return transaction.Error
 }
 
 // RequestDataLink sends a DataLinkReq message to the server.
@@ -156,5 +161,10 @@ func (c *Client) RequestDataLink(serverIndex string, timeout int) error {
 	}
 	transaction := NewTransaction(c, serverIndex, &header, nil, timeout)
 	c.Servers[serverIndex].Transactions[transaction.ID] = transaction
-	return nil
+	for {
+		if transaction.isCompleted() {
+			break
+		}
+	}
+	return transaction.Error
 }
