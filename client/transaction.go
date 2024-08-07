@@ -24,6 +24,8 @@ type Transaction struct {
 	Client         *Client
 	ServerIndex    string
 	StartedAt      time.Time
+	EndedAt        time.Time
+	Processed      bool
 	Completed      bool
 	RequestHeader  *messages.Header
 	RequestBody    []byte
@@ -40,6 +42,7 @@ func NewTransaction(client *Client, serverIndex string, requestHeader *messages.
 		Client:        client,
 		ServerIndex:   serverIndex,
 		StartedAt:     time.Now(),
+		Processed:     false,
 		Completed:     false,
 		RequestHeader: requestHeader,
 		RequestBody:   requestBody,
@@ -62,6 +65,7 @@ func (t *Transaction) isCompleted() bool {
 func (t *Transaction) setCompleted(err error) {
 	t.Error = err
 	t.Completed = true
+	t.EndedAt = time.Now()
 }
 
 // TimeOut checks if the transaction has timed out and sets the error if it has.
@@ -86,7 +90,12 @@ func (t *Transaction) Process() {
 			return
 		}
 
+		if t.Processed {
+			continue
+		}
+
 		if t.Segment != 0 && t.Segment == len(t.ResponseBody) {
+			t.Processed = true
 			switch t.RequestHeader.MessageType {
 			case srmcp.HandShake:
 				go t.HandleHandShake()
