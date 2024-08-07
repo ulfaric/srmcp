@@ -207,7 +207,11 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint
 			case srmcp.Write:
 				go s.HandleWrite(clientIndex, header, body)
 			}
+		} else if err == io.EOF {
+			log.Printf("Client %s disconnected from data channel on port %d", clientIndex, dataport)
+			return
 		} else {
+			log.Printf("Failed to digest data message from client %s: %v", clientIndex, err)
 			continue
 		}
 	}

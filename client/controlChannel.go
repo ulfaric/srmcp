@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/cloudflare/circl/kem/kyber/kyber1024"
@@ -67,7 +69,11 @@ func (c *Client) HandleControlConn(conn *tls.Conn) {
 			transaction.ResponseBody[header.Index] = body
 			transaction.Segment = header.Segment
 			c.Servers[serverIndex].mu.Unlock()
+		} else if strings.Contains(err.Error(), "use of closed network connection") {
+			log.Printf("Control connection to server at %s is closed", serverIndex)
+			return
 		} else {
+			log.Printf("Failed to digest message from server at %s: %v", serverIndex, err)
 			continue
 		}
 	}

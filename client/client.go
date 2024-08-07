@@ -123,12 +123,9 @@ func (c *Client) Close(serverIndex string) error {
 		return nil
 	}
 	server.ControlConn.Close()
-	log.Printf("Client closed control connection to server %s on %s", c.Servers[serverIndex].ID, server.ControlConn.RemoteAddr().String())
 	for _, conn := range server.DataConn {
-		log.Printf("Client closed data connection to server %s on %s", c.Servers[serverIndex].ID, conn.RemoteAddr().String())
 		conn.Close()
 	}
-	log.Printf("Disconnected from server %s", c.Servers[serverIndex].ID)
 	delete(c.Servers, serverIndex)
 	return nil
 }

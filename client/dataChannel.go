@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -70,7 +72,11 @@ func (c *Client) HandleDataConn(conn *tls.Conn, serverIndex string) {
 			transcation.ResponseBody[header.Index] = body
 			transcation.Segment = header.Segment
 			c.Servers[serverIndex].mu.Unlock()
+		} else if strings.Contains(err.Error(), "use of closed network connection") {
+			log.Printf("Data connection to server %s is closed", serverIndex)
+			return
 		} else {
+			log.Printf("Error reading data connection: %v", err)
 			continue
 		}
 	}

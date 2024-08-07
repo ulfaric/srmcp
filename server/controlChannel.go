@@ -115,7 +115,11 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 			default:
 				log.Printf("Received unknown message type from client %s", header.SenderID)
 			}
+		} else if err == io.EOF {
+			log.Printf("Client %s disconnected from control connection", clientIndex)
+			return
 		} else {
+			log.Printf("Failed to digest control message from client %s: %v", clientIndex, err)
 			continue
 		}
 
