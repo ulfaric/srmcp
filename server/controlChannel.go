@@ -97,11 +97,11 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 
 	log.Printf("Control Channel Handshake successful with Client from %s", clientIndex)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.Clients[clientIndex] = &ConnectedClient{
 		ControlConn: tlsConn,
 		DataConn:    make([]*tls.Conn, 0),
 	}
+	s.mu.Unlock()
 	log.Printf("Client from %s connected", clientIndex)
 
 	for {
@@ -109,9 +109,9 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 		if err == nil {
 			switch header.MessageType {
 			case srmcp.HandShake:
-				s.HandleHandShake(clientIndex, header, body)
+				go s.HandleHandShake(clientIndex, header, body)
 			case srmcp.DataLinkReq:
-				s.HandleDateLinkReq(header, clientIndex)
+				go s.HandleDateLinkReq(header, clientIndex)
 			default:
 				log.Printf("Received unknown message type from client %s", header.SenderID)
 			}

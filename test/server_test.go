@@ -46,7 +46,7 @@ func TestClientServerConnection(t *testing.T) {
 	}()
 
 	// Start the server
-	srv, err := server.NewServer(serverCertPath, serverKeyPath, caCertPath, "127.0.0.1", 8080)
+	srv, err := server.NewServer(serverCertPath, serverKeyPath, caCertPath, "127.0.0.1", 8081)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestClientServerConnection(t *testing.T) {
 	childNode := srv.AddNode("childNode", 1)
 	parentNode.AddChild(childNode)
 
-	serverAddr := "127.0.0.1:8080"
+	serverAddr := "127.0.0.1:8081"
 	go func() {
 		if err := srv.Run(); err != nil {
 			log.Fatalf("Failed to start server: %v", err)
@@ -70,7 +70,7 @@ func TestClientServerConnection(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	err = clt.Connect("127.0.0.1", 8080, 100)
+	err = clt.Connect("127.0.0.1", 8081, 100)
 	if err != nil {
 		t.Fatalf("Client failed to connect to server: %v", err)
 	}

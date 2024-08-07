@@ -89,15 +89,15 @@ func (t *Transaction) Process() {
 		if t.Segment != 0 && t.Segment == len(t.ResponseBody) {
 			switch t.RequestHeader.MessageType {
 			case srmcp.HandShake:
-				t.HandleHandShake()
+				go t.HandleHandShake()
 			case srmcp.DataLinkReq:
-				t.HandleDataLinkRep()
+				go t.HandleDataLinkRep()
 			case srmcp.Discovery:
-				t.HandleDiscovery()
+				go t.HandleDiscovery()
 			case srmcp.Read:
-				t.HandleReadResponse()
+				go t.HandleReadResponse()
 			case srmcp.Write:
-				t.handleWriteResponse()
+				go t.handleWriteResponse()
 			default:
 				t.setCompleted(errors.New("unknown message type"))
 				log.Printf("Unknown message type")
@@ -165,7 +165,7 @@ func (t *Transaction) HandleDataLinkRep() {
 		conn, err := tls.Dial("tcp", serverDataLinkAddr, config)
 		if err != nil {
 			t.setCompleted(err)
-			log.Printf("Failed to connect to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
+			// log.Printf("Failed to connect to Data Link on server %s, port %d", t.Client.Servers[t.ServerIndex].Address, dataport)
 			return
 		} else {
 			t.Client.Servers[t.ServerIndex].mu.Lock()

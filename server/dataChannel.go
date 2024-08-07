@@ -201,11 +201,11 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint
 		if err == nil {
 			switch header.MessageType {
 			case srmcp.Discovery:
-				s.HandleDiscovery(clientIndex, header)
+				go s.HandleDiscovery(clientIndex, header)
 			case srmcp.Read:
-				s.HandleRead(clientIndex, header, body)
+				go s.HandleRead(clientIndex, header, body)
 			case srmcp.Write:
-				s.HandleWrite(clientIndex, header, body)
+				go s.HandleWrite(clientIndex, header, body)
 			}
 		} else {
 			continue
