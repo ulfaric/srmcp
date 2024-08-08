@@ -306,6 +306,14 @@ func (s *Server) HandleRead(clientIndex string, header *messages.Header, body []
 			log.Printf("Node %s name mismatch", nodeID)
 			continue
 		}
+		if node.Read != nil {
+			v, err := (*node.Read)()
+			if err != nil {
+				log.Printf("Failed to read node %s: %v", nodeID, err)
+				continue
+			}
+			node.Value = v
+		}
 		readResponse = append(readResponse, &messages.ReadResponse{
 			NodeID:   nodeID,
 			NodeName: node.Name,
@@ -365,7 +373,17 @@ func (s *Server) HandleWrite(clientIndex string, header *messages.Header, body [
 		log.Printf("Node %s name mismatch", writeRequest.NodeID)
 		return
 	}
-	node.Value = writeRequest.Value
+	if node.Write != nil {
+		err = (*node.Write)(writeRequest.Value)
+		if err != nil {
+			log.Printf("Failed to write node %s: %v", writeRequest.NodeID, err)
+			return
+		} else {
+			node.Value = writeRequest.Value
+		}
+	} else {
+		node.Value = writeRequest.Value
+	}
 	log.Printf("Updated node %s value to %v", writeRequest.NodeID, writeRequest.Value)
 
 	// Prepare the response header

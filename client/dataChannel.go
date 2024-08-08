@@ -244,6 +244,7 @@ func (c *Client) Write(serverIndex string, nodeName string, value interface{}, t
 	if validNode == nil {
 		return fmt.Errorf("no valid node with %s found", nodeName)
 	}
+	validNode.Value = value
 	body := messages.Write{
 		NodeID:   validNode.ID,
 		NodeName: validNode.Name,

@@ -289,10 +289,15 @@ func (t *Transaction) handleWriteResponse() {
 				return
 			}
 			if writeResponse.Value != t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Value {
-				t.setCompleted(errors.New("write response value does not match"))
-				log.Printf("Write response value does not match, expected %v, got %v", t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Value, writeResponse.Value)
+				log.Printf("Write Operation Failed, server response contains mismatched value, expected %v, got %v", t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Value, writeResponse.Value)
+				t.Client.Servers[t.ServerIndex].mu.Lock()
+				t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Value = writeResponse.Value
+				t.Client.Servers[t.ServerIndex].mu.Unlock()
+				t.setCompleted(errors.New("Write Operation Failed, server response contains mismatched value"))
+				return
 			}
-			log.Printf(("Write operation successful on server %s, node %s value updated to %v"), t.Client.Servers[t.ServerIndex].ID, t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Name, writeResponse.Value)
+			t.setCompleted(nil)
+			log.Printf(("Received write response from server %s, node %s value verified as %v"), t.Client.Servers[t.ServerIndex].ID, t.Client.Servers[t.ServerIndex].Nodes[writeResponse.NodeID].Name, writeResponse.Value)
 			return
 		}
 	}

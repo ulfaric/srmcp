@@ -18,7 +18,7 @@ import (
 type ConnectedClient struct {
 	ID           string
 	ControlConn  *tls.Conn
-	DataConn	 []*tls.Conn
+	DataConn     []*tls.Conn
 	SharedSecret []byte
 	PublicKey    *kyber1024.PublicKey
 	mu           sync.Mutex
@@ -106,9 +106,9 @@ func (s *Server) Stop() {
 }
 
 // AddNode adds a new node to the server's node list.
-func (s *Server) AddNode(name string, value interface{}) *node.Node {
+func (s *Server) AddNode(name string, value interface{}, readFunc *func() (interface{}, error), writeFunc *func(interface{}) error) *node.Node {
 	id := uuid.New().String()
-	s.Nodes[id] = node.NewNode(id, name, value)
+	s.Nodes[id] = node.NewNode(id, name, value, readFunc, writeFunc)
 	return s.Nodes[id]
 }
 

@@ -21,17 +21,21 @@ type Node struct {
 	Desc     string
 	Parent   map[string]*Node
 	Children map[string]*Node
+	Read     *func() (interface{}, error)
+	Write    *func(interface{}) error
 	mu       sync.Mutex
 }
 
 // NewNode creates a new node with the given name and value.
-func NewNode(id, name string, value interface{}) *Node {
+func NewNode(id, name string, value interface{}, readFunc *func() (interface{}, error), writeFunc *func(interface{}) error) *Node {
 	return &Node{
 		ID:       id,
 		Name:     name,
 		Value:    value,
 		Parent:   make(map[string]*Node),
 		Children: make(map[string]*Node),
+		Read:     readFunc,
+		Write:    writeFunc,
 	}
 }
 

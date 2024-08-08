@@ -50,8 +50,8 @@ func TestClientServerConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
-	parentNode := srv.AddNode("parentNode", "0asdaw")
-	childNode := srv.AddNode("childNode", 1)
+	parentNode := srv.AddNode("parentNode", "0asdaw", nil, nil)
+	childNode := srv.AddNode("childNode", 1, nil, nil)
 	parentNode.AddChild(childNode)
 
 	serverAddr := "127.0.0.1:8081"
