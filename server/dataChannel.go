@@ -20,7 +20,7 @@ import (
 	"github.com/ulfaric/srmcp/node"
 )
 
-func (s *Server) DigestEncryptedMessage(conn *tls.Conn, clientIndex string) (*messages.Header, []byte, error) {
+func (s *Server) DigestEncryptedMessage(conn *tls.Conn, clientIndex string) ([]byte, []byte, error) {
 	// Read the pre-header
 	preHeaderBuffer := make([]byte, 8)
 	if _, err := io.ReadFull(conn, preHeaderBuffer); err != nil {
@@ -36,22 +36,6 @@ func (s *Server) DigestEncryptedMessage(conn *tls.Conn, clientIndex string) (*me
 	if _, err := io.ReadFull(conn, headerBuffer); err != nil {
 		return nil, nil, err
 	}
-	headerBytes, err := srmcp.Decrypt(s.Clients[clientIndex].SharedSecret, headerBuffer)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Deserialize the header
-	var header messages.Header
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return nil, nil, err
-	}
-
-	// Validate the header
-	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(header); err != nil {
-		return nil, nil, err
-	}
 
 	// Read the body
 	bodyBuffer := make([]byte, bodyLength)
@@ -60,7 +44,7 @@ func (s *Server) DigestEncryptedMessage(conn *tls.Conn, clientIndex string) (*me
 
 	}
 
-	return &header, bodyBuffer, nil
+	return headerBuffer, bodyBuffer, nil
 }
 
 // StartDataConn starts the data connection by listening on the server's address and a random port.
@@ -197,22 +181,36 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint
 
 	// Read data from the client
 	for {
-		header, body, err := s.DigestEncryptedMessage(tlsConn, clientIndex)
+		headerBuffer, bodyBuffer, err := s.DigestEncryptedMessage(tlsConn, clientIndex)
 		if err == nil {
+			headerBytes, err := srmcp.Decrypt(s.Clients[clientIndex].SharedSecret, headerBuffer)
+			if err != nil {
+				log.Printf("Failed to decrypt data message header from client %s: %v", s.Clients[clientIndex].ID, err)
+				continue
+			}
+			// Deserialize the header
+			var header messages.Header
+			if err := json.Unmarshal(headerBytes, &header); err != nil {
+				log.Printf("Failed to unmarshal data message header from client %s: %v", s.Clients[clientIndex].ID, err)
+				continue
+			}
+			// Validate the header
+			validate := validator.New(validator.WithRequiredStructEnabled())
+			if err := validate.Struct(header); err != nil {
+				log.Printf("Invalid data message header from client %s: %v", s.Clients[clientIndex].ID, err)
+				continue
+			}
 			switch header.MessageType {
 			case srmcp.Discovery:
-				go s.HandleDiscovery(clientIndex, header)
+				go s.HandleDiscovery(clientIndex, &header)
 			case srmcp.Read:
-				go s.HandleRead(clientIndex, header, body)
+				go s.HandleRead(clientIndex, &header, bodyBuffer)
 			case srmcp.Write:
-				go s.HandleWrite(clientIndex, header, body)
+				go s.HandleWrite(clientIndex, &header, bodyBuffer)
 			}
-		} else if err == io.EOF {
-			log.Printf("Client %s disconnected from data channel on port %d", clientIndex, dataport)
-			return
 		} else {
-			log.Printf("Failed to digest data message from client %s: %v", clientIndex, err)
-			continue
+			log.Printf("Closes data channel with client %s on port %d, %v", clientIndex, dataport, err)
+			return
 		}
 	}
 }

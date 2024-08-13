@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"math/rand"
-	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -18,7 +17,7 @@ import (
 	"github.com/ulfaric/srmcp/node"
 )
 
-func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) (*messages.Header, []byte, error) {
+func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) ([]byte, []byte, error) {
 	// Read the pre-header
 	preHeaderBuffer := make([]byte, 8)
 	if _, err := io.ReadFull(conn, preHeaderBuffer); err != nil {
@@ -34,22 +33,6 @@ func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) (*me
 	if _, err := io.ReadFull(conn, headerBuffer); err != nil {
 		return nil, nil, err
 	}
-	headerBytes, err := srmcp.Decrypt(c.Servers[serverIndex].SharedSecret, headerBuffer)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Deserialize the header
-	var header messages.Header
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return nil, nil, err
-	}
-
-	// Validate the header
-	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(header); err != nil {
-		return nil, nil, err
-	}
 
 	// Read the body
 	bodyBuffer := make([]byte, bodyLength)
@@ -58,26 +41,41 @@ func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) (*me
 
 	}
 
-	return &header, bodyBuffer, nil
+	return headerBuffer, bodyBuffer, nil
 }
 
 func (c *Client) HandleDataConn(conn *tls.Conn, serverIndex string) {
 	defer conn.Close()
 	for {
-		header, body, err := c.DigestEncryptedMessage(conn, serverIndex)
+		headerBuffer, bodyBuffer, err := c.DigestEncryptedMessage(conn, serverIndex)
 		if err == nil {
+			// Decrypt the header
+			headerBytes, err := srmcp.Decrypt(c.Servers[serverIndex].SharedSecret, headerBuffer)
+			if err != nil {
+				log.Printf("Failed to decrypt data message header from server %s", c.Servers[serverIndex].ID)
+				continue
+			}
+			// Deserialize the header
+			var header messages.Header
+			if err := json.Unmarshal(headerBytes, &header); err != nil {
+				log.Printf("Failed to unmarshal data message header from server %s, %v", c.Servers[serverIndex].ID, err)
+				continue
+			}
+			// Validate the header
+			validate := validator.New(validator.WithRequiredStructEnabled())
+			if err := validate.Struct(header); err != nil {
+				log.Printf("Invalid data message header from server %s, %v", c.Servers[serverIndex].ID, err)
+				continue
+			}
 			transcation := c.Servers[serverIndex].Transactions[header.TransactionID]
 			c.Servers[serverIndex].mu.Lock()
-			transcation.ResponseHeader = header
-			transcation.ResponseBody[header.Index] = body
+			transcation.ResponseHeader = &header
+			transcation.ResponseBody[header.Index] = bodyBuffer
 			transcation.Segment = header.Segment
 			c.Servers[serverIndex].mu.Unlock()
-		} else if strings.Contains(err.Error(), "use of closed network connection") {
-			log.Printf("Data connection to server %s is closed", serverIndex)
-			return
 		} else {
-			log.Printf("Error reading data connection: %v", err)
-			continue
+			log.Printf("closes data channel with serverl %s, %v", serverIndex, err)
+			return
 		}
 	}
 

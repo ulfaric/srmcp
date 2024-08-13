@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/cloudflare/circl/kem/kyber/kyber1024"
@@ -18,7 +17,7 @@ import (
 	"github.com/ulfaric/srmcp/messages"
 )
 
-func DigestMessage(conn *tls.Conn) (*messages.Header, []byte, error) {
+func DigestMessage(conn *tls.Conn) ([]byte, []byte, error) {
 	// Read the pre-header
 	preHeaderBuffer := make([]byte, 8)
 	if _, err := io.ReadFull(conn, preHeaderBuffer); err != nil {
@@ -35,18 +34,6 @@ func DigestMessage(conn *tls.Conn) (*messages.Header, []byte, error) {
 		return nil, nil, err
 	}
 
-	// Deserialize the header
-	var header messages.Header
-	if err := json.Unmarshal(headerBuffer, &header); err != nil {
-		return nil, nil, err
-	}
-
-	// Validate the header
-	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(header); err != nil {
-		return nil, nil, err
-	}
-
 	// Read the body
 	bodyBuffer := make([]byte, bodyLength)
 	if _, err := io.ReadFull(conn, bodyBuffer); err != nil {
@@ -54,27 +41,36 @@ func DigestMessage(conn *tls.Conn) (*messages.Header, []byte, error) {
 		return nil, nil, err
 	}
 
-	return &header, bodyBuffer, nil
+	return headerBuffer, bodyBuffer, nil
 }
 
 func (c *Client) HandleControlConn(conn *tls.Conn) {
 	defer conn.Close()
 	serverIndex := conn.RemoteAddr().String()
 	for {
-		header, body, err := DigestMessage(conn)
+		headerBuffer, bodyBuffer, err := DigestMessage(conn)
 		if err == nil {
+			// Deserialize the header
+			var header messages.Header
+			if err := json.Unmarshal(headerBuffer, &header); err != nil {
+				log.Printf("Failed to deserialize control message header from server %s", serverIndex)
+				continue
+			}
+			// Validate the header
+			validate := validator.New(validator.WithRequiredStructEnabled())
+			if err := validate.Struct(header); err != nil {
+				log.Printf("Invalid control message header from server %s: %v", serverIndex, err)
+				continue
+			}
 			transaction := c.Servers[serverIndex].Transactions[header.TransactionID]
 			c.Servers[serverIndex].mu.Lock()
-			transaction.ResponseHeader = header
-			transaction.ResponseBody[header.Index] = body
+			transaction.ResponseHeader = &header
+			transaction.ResponseBody[header.Index] = bodyBuffer
 			transaction.Segment = header.Segment
 			c.Servers[serverIndex].mu.Unlock()
-		} else if strings.Contains(err.Error(), "use of closed network connection") {
-			log.Printf("Control connection to server at %s is closed", serverIndex)
-			return
 		} else {
-			log.Printf("Failed to digest message from server at %s: %v", serverIndex, err)
-			continue
+			log.Printf("closes control channel with server %s, %v", serverIndex, err)
+			return
 		}
 	}
 }

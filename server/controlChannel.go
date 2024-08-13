@@ -19,7 +19,7 @@ import (
 	"github.com/ulfaric/srmcp/messages"
 )
 
-func DigestMessage(conn *tls.Conn) (*messages.Header, []byte, error) {
+func DigestMessage(conn *tls.Conn) ([]byte, []byte, error) {
 	// Read the pre-header
 	preHeaderBuffer := make([]byte, 8)
 	if _, err := io.ReadFull(conn, preHeaderBuffer); err != nil {
@@ -36,18 +36,6 @@ func DigestMessage(conn *tls.Conn) (*messages.Header, []byte, error) {
 		return nil, nil, err
 	}
 
-	// Deserialize the header
-	var header messages.Header
-	if err := json.Unmarshal(headerBuffer, &header); err != nil {
-		return nil, nil, err
-	}
-
-	// Validate the header
-	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(header); err != nil {
-		return nil, nil, err
-	}
-
 	// Read the body
 	bodyBuffer := make([]byte, bodyLength)
 	if _, err := io.ReadFull(conn, bodyBuffer); err != nil {
@@ -55,7 +43,7 @@ func DigestMessage(conn *tls.Conn) (*messages.Header, []byte, error) {
 
 	}
 
-	return &header, bodyBuffer, nil
+	return headerBuffer, bodyBuffer, nil
 }
 
 // StartControlConn starts the control connection by listening on the server's address and port.
@@ -105,22 +93,31 @@ func (s *Server) HandleControlConn(conn net.Conn) {
 	log.Printf("Client from %s connected", clientIndex)
 
 	for {
-		header, body, err := DigestMessage(tlsConn)
+		headerBuffer, bodyBuffer, err := DigestMessage(tlsConn)
 		if err == nil {
+			// Deserialize the header
+			var header messages.Header
+			if err := json.Unmarshal(headerBuffer, &header); err != nil {
+				log.Printf("Failed to deserialize control message header from client %s", clientIndex)
+				continue
+			}
+			// Validate the header
+			validate := validator.New(validator.WithRequiredStructEnabled())
+			if err := validate.Struct(header); err != nil {
+				log.Printf("Invalid control message header from client %s: %v", clientIndex, err)
+				continue
+			}
 			switch header.MessageType {
 			case srmcp.HandShake:
-				go s.HandleHandShake(clientIndex, header, body)
+				go s.HandleHandShake(clientIndex, &header, bodyBuffer)
 			case srmcp.DataLinkReq:
-				go s.HandleDateLinkReq(header, clientIndex)
+				go s.HandleDateLinkReq(&header, clientIndex)
 			default:
 				log.Printf("Received unknown message type from client %s", header.SenderID)
 			}
-		} else if err == io.EOF {
-			log.Printf("Client %s disconnected from control connection", clientIndex)
-			return
 		} else {
-			log.Printf("Failed to digest control message from client %s: %v", clientIndex, err)
-			continue
+			log.Printf("closes control channel with client %s, %v", clientIndex, err)
+			return
 		}
 
 	}
