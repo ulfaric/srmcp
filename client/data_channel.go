@@ -17,6 +17,7 @@ import (
 	"github.com/ulfaric/srmcp/node"
 )
 
+// DigestEncryptedMessage reads and parses an encrypted message from the TLS connection.
 func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) ([]byte, []byte, error) {
 	// Read the pre-header
 	preHeaderBuffer := make([]byte, 8)
@@ -38,52 +39,54 @@ func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) ([]b
 	bodyBuffer := make([]byte, bodyLength)
 	if _, err := io.ReadFull(conn, bodyBuffer); err != nil {
 		return nil, nil, err
-
 	}
 
 	return headerBuffer, bodyBuffer, nil
 }
 
+// HandleDataConn handles the data connection for the client.
 func (c *Client) HandleDataConn(conn *tls.Conn, serverIndex string) {
 	defer conn.Close()
 	for {
 		headerBuffer, bodyBuffer, err := c.DigestEncryptedMessage(conn, serverIndex)
-		if err == nil {
-			// Decrypt the header
-			headerBytes, err := srmcp.Decrypt(c.Servers[serverIndex].SharedSecret, headerBuffer)
-			if err != nil {
-				log.Printf("Failed to decrypt data message header from server %s", c.Servers[serverIndex].ID)
-				continue
-			}
-			// Deserialize the header
-			var header messages.Header
-			if err := json.Unmarshal(headerBytes, &header); err != nil {
-				log.Printf("Failed to unmarshal data message header from server %s, %v", c.Servers[serverIndex].ID, err)
-				continue
-			}
-			// Validate the header
-			validate := validator.New(validator.WithRequiredStructEnabled())
-			if err := validate.Struct(header); err != nil {
-				log.Printf("Invalid data message header from server %s, %v", c.Servers[serverIndex].ID, err)
-				continue
-			}
-			transcation := c.Servers[serverIndex].Transactions[header.TransactionID]
-			c.Servers[serverIndex].mu.Lock()
-			transcation.ResponseHeader = &header
-			transcation.ResponseBody[header.Index] = bodyBuffer
-			transcation.Segment = header.Segment
-			c.Servers[serverIndex].mu.Unlock()
-		} else {
-			log.Printf("closes data channel with serverl %s, %v", serverIndex, err)
+		if err != nil {
+			log.Printf("closes data channel with server %s, %v", serverIndex, err)
 			return
 		}
-	}
 
+		// Decrypt the header
+		headerBytes, err := srmcp.Decrypt(c.Servers[serverIndex].SharedSecret, headerBuffer)
+		if err != nil {
+			log.Printf("Failed to decrypt data message header from server %s", c.Servers[serverIndex].ID)
+			continue
+		}
+
+		// Deserialize the header
+		var header messages.Header
+		if err := json.Unmarshal(headerBytes, &header); err != nil {
+			log.Printf("Failed to unmarshal data message header from server %s, %v", c.Servers[serverIndex].ID, err)
+			continue
+		}
+
+		// Validate the header
+		validate := validator.New(validator.WithRequiredStructEnabled())
+		if err := validate.Struct(header); err != nil {
+			log.Printf("Invalid data message header from server %s, %v", c.Servers[serverIndex].ID, err)
+			continue
+		}
+
+		// Process the transaction
+		c.Servers[serverIndex].mu.Lock()
+		transaction := c.Servers[serverIndex].Transactions[header.TransactionID]
+		transaction.ResponseHeader = &header
+		transaction.ResponseBody[header.Index] = bodyBuffer
+		transaction.Segment = header.Segment
+		c.Servers[serverIndex].mu.Unlock()
+	}
 }
 
 // Discover sends a Discover message to the server with the given index.
 func (c *Client) Discover(serverIndex string, timeout int) error {
-
 	// Prepare the header
 	header := messages.Header{
 		MessageType:   srmcp.Discovery,
@@ -113,8 +116,8 @@ func (c *Client) Discover(serverIndex string, timeout int) error {
 	bytes := append(preHeaderBytes, encryptedHeader...)
 
 	// Randomly select a data link
-	datalink_index := rand.Intn(len(c.Servers[serverIndex].DataConn))
-	_, err = c.Servers[serverIndex].DataConn[datalink_index].Write(bytes)
+	datalinkIndex := rand.Intn(len(c.Servers[serverIndex].DataConn))
+	_, err = c.Servers[serverIndex].DataConn[datalinkIndex].Write(bytes)
 	if err != nil {
 		return fmt.Errorf("failed to send Discover message: %w", err)
 	}
@@ -142,12 +145,12 @@ func (c *Client) Read(serverIndex string, nodeNames []string, timeout int) ([]*n
 	// Serialize header
 	headerBytes, err := json.Marshal(header)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Discover message header: %w", err)
+		return nil, fmt.Errorf("failed to marshal Read message header: %w", err)
 	}
 	// Encrypt the header
 	encryptedHeader, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, headerBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt Discover message header: %w", err)
+		return nil, fmt.Errorf("failed to encrypt Read message header: %w", err)
 	}
 
 	// Prepare the Body
@@ -175,12 +178,12 @@ func (c *Client) Read(serverIndex string, nodeNames []string, timeout int) ([]*n
 	// Serialize the body
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Discover message header: %w", err)
+		return nil, fmt.Errorf("failed to marshal Read message body: %w", err)
 	}
 	// Encrypt the body
 	encryptedBody, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, bodyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt Discover message header: %w", err)
+		return nil, fmt.Errorf("failed to encrypt Read message body: %w", err)
 	}
 
 	// Prepare pre-header
@@ -195,10 +198,10 @@ func (c *Client) Read(serverIndex string, nodeNames []string, timeout int) ([]*n
 	bytes = append(bytes, encryptedBody...)
 
 	// Randomly select a data link
-	datalink_index := rand.Intn(len(c.Servers[serverIndex].DataConn))
-	_, err = c.Servers[serverIndex].DataConn[datalink_index].Write(bytes)
+	datalinkIndex := rand.Intn(len(c.Servers[serverIndex].DataConn))
+	_, err = c.Servers[serverIndex].DataConn[datalinkIndex].Write(bytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send Discover message: %w", err)
+		return nil, fmt.Errorf("failed to send Read message: %w", err)
 	}
 
 	// Create a new transaction
@@ -213,6 +216,7 @@ func (c *Client) Read(serverIndex string, nodeNames []string, timeout int) ([]*n
 	return validNodes, transaction.Error
 }
 
+// Write sends a Write message to the server with the given index.
 func (c *Client) Write(serverIndex string, nodeName string, value interface{}, timeout int) error {
 	// Prepare the header
 	header := messages.Header{
@@ -224,12 +228,12 @@ func (c *Client) Write(serverIndex string, nodeName string, value interface{}, t
 	// Serialize header
 	headerBytes, err := json.Marshal(header)
 	if err != nil {
-		return fmt.Errorf("failed to marshal Discover message header: %w", err)
+		return fmt.Errorf("failed to marshal Write message header: %w", err)
 	}
 	// Encrypt the header
 	encryptedHeader, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, headerBytes)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt Discover message header: %w", err)
+		return fmt.Errorf("failed to encrypt Write message header: %w", err)
 	}
 
 	// Prepare the Body
@@ -251,12 +255,12 @@ func (c *Client) Write(serverIndex string, nodeName string, value interface{}, t
 	// Serialize the body
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("failed to marshal Discover message header: %w", err)
+		return fmt.Errorf("failed to marshal Write message body: %w", err)
 	}
 	// Encrypt the body
 	encryptedBody, err := srmcp.Encrypt(c.Servers[serverIndex].SharedSecret, bodyBytes)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt Discover message header: %w", err)
+		return fmt.Errorf("failed to encrypt Write message body: %w", err)
 	}
 
 	// Prepare pre-header
@@ -271,10 +275,10 @@ func (c *Client) Write(serverIndex string, nodeName string, value interface{}, t
 	bytes = append(bytes, encryptedBody...)
 
 	// Randomly select a data link
-	datalink_index := rand.Intn(len(c.Servers[serverIndex].DataConn))
-	_, err = c.Servers[serverIndex].DataConn[datalink_index].Write(bytes)
+	datalinkIndex := rand.Intn(len(c.Servers[serverIndex].DataConn))
+	_, err = c.Servers[serverIndex].DataConn[datalinkIndex].Write(bytes)
 	if err != nil {
-		return fmt.Errorf("failed to send Discover message: %w", err)
+		return fmt.Errorf("failed to send Write message: %w", err)
 	}
 
 	// Create a new transaction

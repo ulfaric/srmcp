@@ -16,6 +16,7 @@ import (
 	"github.com/ulfaric/srmcp/node"
 )
 
+// ConnectedServer represents a server to which the client is connected.
 type ConnectedServer struct {
 	ID           string
 	Address      string
@@ -30,6 +31,7 @@ type ConnectedServer struct {
 	mu           sync.Mutex
 }
 
+// Client represents a client that can connect to multiple servers.
 type Client struct {
 	ID         string
 	Cert       *x509.Certificate
@@ -69,26 +71,30 @@ func NewClient(certFile, keyFile, caCertFile string) (*Client, error) {
 
 // Connect connects the client to the server at the given address.
 func (c *Client) Connect(addr string, port, timeout int) error {
-	// Create a new TLS connection to the server.
+	// Encode the client's certificate and private key to PEM format
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Cert.Raw})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(c.PrivateKey)})
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return err
 	}
+
+	// Configure TLS settings
 	config := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      x509.NewCertPool(),
 	}
 	config.RootCAs.AddCert(c.CACert)
 
+	// Establish a TLS connection to the server
 	serverAddr := fmt.Sprintf("%s:%d", addr, port)
 	conn, err := tls.Dial("tcp", serverAddr, config)
 	if err != nil {
 		log.Fatalf("failed to connect with server at %s: %v", addr, err)
 		return err
 	}
-	// Create a new ConnectedServer struct and add it to the client's map of servers.
+
+	// Create a new ConnectedServer struct and add it to the client's map of servers
 	connectedServer := &ConnectedServer{
 		Address:      addr,
 		Port:         port,
@@ -102,9 +108,11 @@ func (c *Client) Connect(addr string, port, timeout int) error {
 	serverIndex := fmt.Sprintf("%s:%d", addr, port)
 	c.Servers[serverIndex] = connectedServer
 	log.Printf("Connected to server at %s", addr)
-	// Start listening for control messages from the server.
+
+	// Start listening for control messages from the server
 	go c.HandleControlConn(conn)
-	// Send a Handshake message to the server.
+
+	// Send a Handshake message to the server
 	err = c.HandShake(serverIndex, timeout)
 	if err != nil {
 		conn.Close()
@@ -130,6 +138,7 @@ func (c *Client) Close(serverIndex string) error {
 	return nil
 }
 
+// InitializeNodes initializes the nodes for the given server.
 func (c *Client) InitializeNodes(serverIndex string, rawBytes []byte) {
 	var nodeInfos []node.NodeInfo
 	err := json.Unmarshal(rawBytes, &nodeInfos)
