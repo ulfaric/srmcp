@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+// NodeInfo represents the metadata of a node.
 type NodeInfo struct {
 	ID       string `validate:"required"`
 	Name     string `validate:"required"`
@@ -14,6 +15,7 @@ type NodeInfo struct {
 	Children map[string]*NodeInfo
 }
 
+// Node represents a node in the system.
 type Node struct {
 	ID       string
 	Name     string

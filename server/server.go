@@ -108,9 +108,27 @@ func (s *Server) Stop() {
 // AddNode adds a new node to the server's node list.
 func (s *Server) AddNode(name string, value interface{}, readFunc *func() (interface{}, error), writeFunc *func(interface{}) error) *node.Node {
 	id := uuid.New().String()
-	s.Nodes[id] = node.NewNode(id, name, value, readFunc, writeFunc)
+	s.Nodes[id] = &node.Node{
+		ID:    id,
+		Name:  name,
+		Value: value,
+		Read:  readFunc,
+		Write: writeFunc,
+	}
 	return s.Nodes[id]
 }
+
+// GetNodesByName returns all nodes with the given name.
+func (s *Server) GetNodesByName(name string) []*node.Node {
+	var matchingNodes []*node.Node
+	for _, n := range s.Nodes {
+		if n.Name == name {
+			matchingNodes = append(matchingNodes, n)
+		}
+	}
+	return matchingNodes
+}
+
 
 // RemoveNode removes a node from the server's node list.
 func (s *Server) RemoveNode(id string) {
