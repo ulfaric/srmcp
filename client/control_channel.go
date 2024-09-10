@@ -17,6 +17,7 @@ import (
 	"github.com/ulfaric/srmcp/messages"
 )
 
+// DigestMessage reads and parses a message from the TLS connection.
 func DigestMessage(conn *tls.Conn) ([]byte, []byte, error) {
 	// Read the pre-header
 	preHeaderBuffer := make([]byte, 8)
@@ -37,41 +38,45 @@ func DigestMessage(conn *tls.Conn) ([]byte, []byte, error) {
 	// Read the body
 	bodyBuffer := make([]byte, bodyLength)
 	if _, err := io.ReadFull(conn, bodyBuffer); err != nil {
-
 		return nil, nil, err
 	}
 
 	return headerBuffer, bodyBuffer, nil
 }
 
+// HandleControlConn handles the control connection for the client.
 func (c *Client) HandleControlConn(conn *tls.Conn) {
 	defer conn.Close()
 	serverIndex := conn.RemoteAddr().String()
+
 	for {
 		headerBuffer, bodyBuffer, err := DigestMessage(conn)
-		if err == nil {
-			// Deserialize the header
-			var header messages.Header
-			if err := json.Unmarshal(headerBuffer, &header); err != nil {
-				log.Printf("Failed to deserialize control message header from server %s", serverIndex)
-				continue
-			}
-			// Validate the header
-			validate := validator.New(validator.WithRequiredStructEnabled())
-			if err := validate.Struct(header); err != nil {
-				log.Printf("Invalid control message header from server %s: %v", serverIndex, err)
-				continue
-			}
-			transaction := c.Servers[serverIndex].Transactions[header.TransactionID]
-			c.Servers[serverIndex].mu.Lock()
-			transaction.ResponseHeader = &header
-			transaction.ResponseBody[header.Index] = bodyBuffer
-			transaction.Segment = header.Segment
-			c.Servers[serverIndex].mu.Unlock()
-		} else {
+		if err != nil {
 			log.Printf("closes control channel with server %s, %v", serverIndex, err)
 			return
 		}
+
+		// Deserialize the header
+		var header messages.Header
+		if err := json.Unmarshal(headerBuffer, &header); err != nil {
+			log.Printf("Failed to deserialize control message header from server %s", serverIndex)
+			continue
+		}
+
+		// Validate the header
+		validate := validator.New(validator.WithRequiredStructEnabled())
+		if err := validate.Struct(header); err != nil {
+			log.Printf("Invalid control message header from server %s: %v", serverIndex, err)
+			continue
+		}
+
+		// Process the transaction
+		c.Servers[serverIndex].mu.Lock()
+		transaction := c.Servers[serverIndex].Transactions[header.TransactionID]
+		transaction.ResponseHeader = &header
+		transaction.ResponseBody[header.Index] = bodyBuffer
+		transaction.Segment = header.Segment
+		c.Servers[serverIndex].mu.Unlock()
 	}
 }
 
