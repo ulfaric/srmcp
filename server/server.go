@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
@@ -37,6 +38,10 @@ type Server struct {
 	Nodes             map[string]*node.Node
 	AvaliableDataPort []uint32
 	mu                sync.Mutex
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // NewServer creates a new Server instance by reading the certificate and key from files.
@@ -62,6 +67,9 @@ func NewServer(certFile, keyFile, caCertFile, address string, port int) (*Server
 	for i := uint32(40000); i <= 49999; i++ {
 		availableDataPorts = append(availableDataPorts, i)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &Server{
 		ID:                id.String(),
 		Address:           address,
@@ -72,6 +80,8 @@ func NewServer(certFile, keyFile, caCertFile, address string, port int) (*Server
 		Clients:           make(map[string]*ConnectedClient),
 		Nodes:             make(map[string]*node.Node),
 		AvaliableDataPort: availableDataPorts,
+		ctx:               ctx,
+		cancel:            cancel,
 	}, nil
 }
 
@@ -83,11 +93,17 @@ func (s *Server) Run() error {
 		return err
 	}
 	for {
-		conn, err := s.ControlListener.Accept()
-		if err != nil {
-			continue
-		} else {
-			go s.HandleControlConn(conn)
+		select {
+		case <-s.ctx.Done():
+			return nil
+		default:
+			conn, err := s.ControlListener.Accept()
+			if err != nil {
+				continue
+			} else {
+				s.wg.Add(1)
+				go s.HandleControlConn(conn)
+			}
 		}
 	}
 }
@@ -102,6 +118,8 @@ func (s *Server) Stop() {
 			conn.Close()
 		}
 	}
+	s.cancel()
+	s.wg.Wait()
 	log.Println("Server has been shut down.")
 }
 

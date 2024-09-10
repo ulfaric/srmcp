@@ -75,6 +75,7 @@ func (s *Server) StartControlConn() error {
 
 // HandleControlConn handles the control connection with the client.
 func (s *Server) HandleControlConn(conn net.Conn) {
+	defer s.wg.Done()
 	defer conn.Close()
 	tlsConn := conn.(*tls.Conn)
 	clientIndex := tlsConn.RemoteAddr().String()
