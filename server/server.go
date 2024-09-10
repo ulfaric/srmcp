@@ -131,7 +131,9 @@ func (s *Server) AddNode(name string, value interface{}, readFunc *func() (inter
 		Name:  name,
 		Value: value,
 		Read:  readFunc,
-		Write: writeFunc,
+		Write:    writeFunc,
+		Children: make(map[string]*node.Node),
+		Parent:   make(map[string]*node.Node),
 	}
 	return s.Nodes[id]
 }
