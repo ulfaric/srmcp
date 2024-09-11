@@ -19,6 +19,7 @@ import (
 
 // DigestEncryptedMessage reads and parses an encrypted message from the TLS connection.
 func (c *Client) DigestEncryptedMessage(conn *tls.Conn, serverIndex string) ([]byte, []byte, error) {
+	// conn.SetDeadline(time.Now().Add(time.Second * 1))
 	// Read the pre-header
 	preHeaderBuffer := make([]byte, 8)
 	if _, err := io.ReadFull(conn, preHeaderBuffer); err != nil {

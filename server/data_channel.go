@@ -24,6 +24,7 @@ var validate = validator.New(validator.WithRequiredStructEnabled())
 
 // DigestEncryptedMessage reads and returns the encrypted message header and body from the connection
 func (s *Server) DigestEncryptedMessage(conn *tls.Conn, clientIndex string) ([]byte, []byte, error) {
+	// conn.SetDeadline(time.Now().Add(time.Second * 1))
 	preHeaderBuffer := make([]byte, 8)
 	if _, err := io.ReadFull(conn, preHeaderBuffer); err != nil {
 		return nil, nil, err
@@ -189,38 +190,46 @@ func (s *Server) HandleDataConn(conn net.Conn, clientIndex string, dataport uint
 	log.Printf("Client %s connected to data channel on port %d", s.Clients[clientIndex].ID, dataport)
 
 	for {
-		// Read and decrypt the message header and body
-		headerBuffer, bodyBuffer, err := s.DigestEncryptedMessage(tlsConn, clientIndex)
-		if err != nil {
-			log.Printf("Closes data channel with client %s on port %d, %v", clientIndex, dataport, err)
+		select {
+		case <-s.ctx.Done():
 			return
-		}
+		default:
+			// Read and decrypt the message header and body
+			headerBuffer, bodyBuffer, err := s.DigestEncryptedMessage(tlsConn, clientIndex)
+			if err != nil {
+				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+					continue
+				}
+				log.Printf("Closes data channel with client %s on port %d, %v", clientIndex, dataport, err)
+				return
+			}
 
-		headerBytes, err := srmcp.Decrypt(s.Clients[clientIndex].SharedSecret, headerBuffer)
-		if err != nil {
-			log.Printf("Failed to decrypt data message header from client %s: %v", s.Clients[clientIndex].ID, err)
-			continue
-		}
+			headerBytes, err := srmcp.Decrypt(s.Clients[clientIndex].SharedSecret, headerBuffer)
+			if err != nil {
+				log.Printf("Failed to decrypt data message header from client %s: %v", s.Clients[clientIndex].ID, err)
+				continue
+			}
 
-		var header messages.Header
-		if err := json.Unmarshal(headerBytes, &header); err != nil {
-			log.Printf("Failed to unmarshal data message header from client %s: %v", s.Clients[clientIndex].ID, err)
-			continue
-		}
+			var header messages.Header
+			if err := json.Unmarshal(headerBytes, &header); err != nil {
+				log.Printf("Failed to unmarshal data message header from client %s: %v", s.Clients[clientIndex].ID, err)
+				continue
+			}
 
-		if err := validate.Struct(header); err != nil {
-			log.Printf("Invalid data message header from client %s: %v", s.Clients[clientIndex].ID, err)
-			continue
-		}
+			if err := validate.Struct(header); err != nil {
+				log.Printf("Invalid data message header from client %s: %v", s.Clients[clientIndex].ID, err)
+				continue
+			}
 
-		// Handle the message based on its type
-		switch header.MessageType {
-		case srmcp.Discovery:
-			go s.HandleDiscovery(clientIndex, &header)
-		case srmcp.Read:
-			go s.HandleRead(clientIndex, &header, bodyBuffer)
-		case srmcp.Write:
-			go s.HandleWrite(clientIndex, &header, bodyBuffer)
+			// Handle the message based on its type
+			switch header.MessageType {
+			case srmcp.Discovery:
+				go s.HandleDiscovery(clientIndex, &header)
+			case srmcp.Read:
+				go s.HandleRead(clientIndex, &header, bodyBuffer)
+			case srmcp.Write:
+				go s.HandleWrite(clientIndex, &header, bodyBuffer)
+			}
 		}
 	}
 }
